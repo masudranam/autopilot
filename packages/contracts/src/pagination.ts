@@ -77,6 +77,26 @@ export interface OffsetPaginated<T> {
   pageInfo: OffsetPageInfo;
 }
 
+/**
+ * Derives the database `skip` for an offset page. Pages are 1-based.
+ *
+ * Provided so every admin table does not hand-roll `(page - 1) * pageSize` — the
+ * off-by-one there is easy to write and hard to notice, because page 1 looks correct
+ * either way.
+ */
+export function offsetSkip(query: { page: number; pageSize: number }): number {
+  return (query.page - 1) * query.pageSize;
+}
+
+/**
+ * Total pages for a result set. Zero items means zero pages, not one — an empty
+ * table should not report "page 1 of 1".
+ */
+export function totalPages(totalItems: number, pageSize: number): number {
+  if (pageSize <= 0) throw new RangeError('pageSize must be positive');
+  return Math.ceil(totalItems / pageSize);
+}
+
 export const offsetQuerySchema = z.object({
   page: z.preprocess(optionalQueryValue, z.coerce.number().int().positive().default(1)),
   pageSize: z.preprocess(

@@ -6,6 +6,8 @@ import {
   cursorQuerySchema,
   offsetPaginatedSchema,
   offsetQuerySchema,
+  offsetSkip,
+  totalPages,
   pageInfoSchema,
   paginatedSchema,
   sortDirectionSchema,
@@ -100,6 +102,44 @@ describe('offsetQuerySchema', () => {
 
   it('caps pageSize like the cursor query does', () => {
     expect(() => offsetQuerySchema.parse({ pageSize: MAX_PAGE_SIZE + 1 })).toThrow();
+  });
+});
+
+describe('offsetSkip', () => {
+  it.each([
+    [1, 24, 0],
+    [2, 24, 24],
+    [3, 10, 20],
+  ])('page %i of size %i skips %i', (page, pageSize, expected) => {
+    expect(offsetSkip({ page, pageSize })).toBe(expected);
+  });
+
+  // Page 1 looks right under both the correct formula and the off-by-one, which is
+  // why the bug survives casual testing.
+  it('does not skip anything on the first page', () => {
+    expect(offsetSkip({ page: 1, pageSize: 50 })).toBe(0);
+  });
+});
+
+describe('totalPages', () => {
+  it.each([
+    [0, 24, 0],
+    [1, 24, 1],
+    [24, 24, 1],
+    [25, 24, 2],
+    [100, 10, 10],
+    [101, 10, 11],
+  ])('%i items at %i per page is %i pages', (items, size, expected) => {
+    expect(totalPages(items, size)).toBe(expected);
+  });
+
+  // An empty table must not report "page 1 of 1".
+  it('reports zero pages for an empty result set', () => {
+    expect(totalPages(0, 24)).toBe(0);
+  });
+
+  it('rejects a non-positive page size rather than returning Infinity', () => {
+    expect(() => totalPages(10, 0)).toThrow(RangeError);
   });
 });
 
