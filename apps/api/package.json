@@ -5,15 +5,15 @@
   "description": "NestJS API — modular monolith (Nest itself arrives in F4; F3 is the data foundation)",
   "type": "commonjs",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src prisma",
-    "test": "prisma migrate deploy && prisma db seed && jest",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
+    "lint": "prisma generate && eslint src prisma",
+    "test": "prisma migrate deploy && prisma generate && prisma db seed && jest",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:migrate:dev": "prisma migrate dev",
-    "db:seed": "prisma db seed",
-    "db:reset": "prisma migrate reset --force --skip-seed && prisma db seed"
+    "db:migrate": "prisma migrate deploy && prisma generate",
+    "db:migrate:dev": "prisma migrate dev && prisma generate",
+    "db:seed": "prisma generate && prisma db seed",
+    "db:reset": "prisma migrate reset --force --skip-seed && prisma generate && prisma db seed"
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.9.1",
