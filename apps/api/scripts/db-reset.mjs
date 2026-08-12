@@ -13,6 +13,10 @@
  * or remote URL can never be wiped by it. Do not widen the host allowlist — if a
  * remote database ever legitimately needs resetting, that decision belongs to a
  * human at a keyboard, not to this script.
+ *
+ * Known limit of the guard: loopback is not the same as disposable. An SSH tunnel or
+ * port-forward to a remote database lands on 127.0.0.1 and would pass. The guard is a
+ * strong second line, not a substitute for keeping production URLs out of .env.
  */
 import { execFileSync } from 'node:child_process';
 
@@ -53,11 +57,14 @@ function prisma(args, extraEnv = {}) {
   });
 }
 
-// Generate BEFORE reset: if reset auto-runs the seed (migrations.seed), the seed
-// imports the generated client, which may not exist on a fresh clone.
+// Generate first — the seed imports the generated client, which may not exist on a
+// fresh clone. Then reset, then seed explicitly: Prisma 7's `migrate reset` does NOT
+// run migrations.seed (verified empirically — users count is 0 after a bare reset),
+// so a reset that claimed to reseed would leave an empty database.
 prisma(['generate']);
 prisma(['migrate', 'reset', '--force'], {
   PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: CONSENT,
 });
+prisma(['db', 'seed']);
 
-console.log(`db-reset: ${host} reset and reseeded from empty`);
+console.log(`db-reset: ${host} reset, migrated and seeded from empty`);

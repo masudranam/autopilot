@@ -130,7 +130,7 @@ erDiagram
   PriceList ||--o{ Price : contains
 
   Cart ||--o{ CartLine : holds
-  Cart ||--o| CheckoutSession : becomes
+  Cart ||--o{ CheckoutSession : becomes
   CheckoutSession ||--o| Order : produces
 
   Order ||--o{ OrderLine : contains
@@ -153,7 +153,9 @@ erDiagram
   released by a BullMQ job on expiry. This is what stops overselling.
 - **Price** is `{ amountMinor: Int, currency: String, priceListId }` — see I1.
 - **CheckoutSession** is a state machine (§6.2) distinct from `Cart`; the cart stays mutable, the
-  session freezes what is being bought.
+  session freezes what is being bought. A cart may produce **several** sessions over time — a
+  session that expires or fails is replaced by a new one rather than resurrected — but at most one
+  is active. _(Amended in F3: the original ERD showed at most one session per cart.)_
 - **AuditLog** records every admin mutation: actor, action, entity, before/after, timestamp.
 
 ---

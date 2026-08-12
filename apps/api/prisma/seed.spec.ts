@@ -43,7 +43,12 @@ async function fingerprint() {
     prisma.product.findMany({ orderBy: { slug: 'asc' } }),
     prisma.productOption.findMany({ orderBy: { id: 'asc' } }),
     prisma.productOptionValue.findMany({ orderBy: { id: 'asc' } }),
-    prisma.productVariant.findMany({ orderBy: { sku: 'asc' } }),
+    // include the option-value links: the implicit m2m join table is seeded too, and
+    // a fingerprint that skips it would miss a regression touching only the links
+    prisma.productVariant.findMany({
+      orderBy: { sku: 'asc' },
+      include: { optionValues: { orderBy: { id: 'asc' } } },
+    }),
     prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } }),
     prisma.priceList.findMany({ orderBy: { name: 'asc' } }),
     prisma.price.findMany({ orderBy: { id: 'asc' } }),

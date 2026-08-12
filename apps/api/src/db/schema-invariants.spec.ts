@@ -122,3 +122,53 @@ describe('relational hygiene (rules/30-prisma.md)', () => {
     for (const match of ids) expect(match[1]).toBe('uuid(7)');
   });
 });
+
+describe('database naming is snake_case (rules/30-prisma.md)', () => {
+  const models = modelBlocks();
+  const enumNames = [...schema.matchAll(/^enum\s+(\w+)\s+\{/gm)].map((m) => m[1]!);
+  const scalarTypes = new Set([
+    'String',
+    'Int',
+    'Boolean',
+    'DateTime',
+    'Json',
+    'BigInt',
+    'Bytes',
+    ...enumNames,
+  ]);
+
+  const toSnake = (name: string) => name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+
+  it('every model maps to a plural snake_case table', () => {
+    for (const [name, body] of models) {
+      const map = /@@map\("([^"]+)"\)/.exec(body);
+      expect(`${name}: ${map?.[1] ?? 'NO @@map'}`).toMatch(/: [a-z][a-z0-9_]*s$/);
+    }
+  });
+
+  it('every camelCase scalar column maps to its snake_case name', () => {
+    for (const [modelName, body] of models) {
+      const code = body.replace(/\/\/[^\n]*/g, '');
+      for (const line of code.split('\n')) {
+        const field = /^\s{2}(\w+)\s+(\w+)(\??)(\[\])?\s*(.*)$/.exec(line);
+        if (!field) continue;
+        const [, name, type, , , rest] = field;
+        if (!scalarTypes.has(type!)) continue; // relation object fields have no column
+        if (!/[A-Z]/.test(name!)) continue; // already snake-identical
+        const map = /@map\("([^"]+)"\)/.exec(rest!);
+        expect(`${modelName}.${name}: ${map?.[1] ?? 'NO @map'}`).toBe(
+          `${modelName}.${name}: ${toSnake(name!)}`,
+        );
+      }
+    }
+  });
+
+  it('every enum type maps to a snake_case DB type', () => {
+    const enums = [...schema.matchAll(/^enum\s+(\w+)\s+\{([\s\S]*?)^\}/gm)];
+    expect(enums.length).toBeGreaterThan(0);
+    for (const [, name, body] of enums) {
+      const map = /@@map\("([^"]+)"\)/.exec(body!);
+      expect(`${name}: ${map?.[1] ?? 'NO @@map'}`).toBe(`${name}: ${toSnake(name!)}`);
+    }
+  });
+});
