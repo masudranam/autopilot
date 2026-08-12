@@ -1,0 +1,15 @@
+packages:
+  - apps/*
+  - packages/*
+  - e2e
+
+# pnpm 10 blocks dependency lifecycle scripts by default. These genuinely need to
+# run at install time (native engines, binary downloads, client generation), so they
+# are allowlisted explicitly rather than disabling the protection wholesale.
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+  - esbuild
+  - sharp
+  - unrs-resolver

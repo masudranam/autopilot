@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Node / NestJS — CommonJS with decorator metadata for DI.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node"],
+
+    // NestJS DI resolves constructor dependencies from design:paramtypes,
+    // which only exists when both of these are on.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    // Nest's decorator-heavy style relies on property initialisation it cannot see.
+    "strictPropertyInitialization": false,
+
+    // Decorators on unused injected params are normal in Nest.
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  }
+}

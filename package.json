@@ -1,0 +1,35 @@
+{
+  "name": "agentic-ecommerce",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Agentic ecommerce platform — built end to end by Claude Code through an issue → PR → review → merge loop",
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
+    "db:migrate": "pnpm --filter @repo/api run db:migrate",
+    "db:seed": "pnpm --filter @repo/api run db:seed",
+    "db:reset": "pnpm --filter @repo/api run db:reset"
+  },
+  "devDependencies": {
+    "@repo/config": "workspace:*",
+    "eslint": "9.39.5",
+    "prettier": "3.9.6",
+    "turbo": "2.10.9",
+    "typescript": "5.9.3"
+  }
+}
