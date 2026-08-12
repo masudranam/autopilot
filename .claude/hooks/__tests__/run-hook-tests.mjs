@@ -150,11 +150,45 @@ expect('guard-git allows --force-with-lease', {
   want: ALLOW,
 });
 
-expect('guard-git is not fooled by "--force" inside a commit message', {
+// Quote stripping: a git command that mentions "--force" and "push" only inside a
+// quoted string must not trip the force-push rule.
+//
+// This deliberately uses `tag` rather than `commit`. A commit would also be judged by
+// the commit-on-main rule, so the expected result would depend on which branch the
+// suite happens to run from — it passed locally on a feature branch and failed in CI,
+// which checks out main. A test whose expectation depends on the environment is not
+// testing what it claims to.
+expect('guard-git is not fooled by "--force push" inside a quoted message', {
   hook: 'guard-git.mjs',
-  payload: bash('git commit -m "document why we never use --force here"'),
+  payload: bash('git tag -a v1.0.0 -m "never --force push to main"'),
   want: ALLOW,
 });
+
+// The commit-on-main rule is genuinely environment-dependent — it fires only on a
+// protected branch of a published repo. Rather than pretend otherwise, detect the
+// situation and assert the correct behaviour for it.
+const currentBranch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+  cwd: projectDir,
+  encoding: 'utf8',
+}).stdout?.trim();
+
+const hasOrigin =
+  spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: projectDir, encoding: 'utf8' })
+    .status === 0;
+
+const mainIsLocked = (currentBranch === 'main' || currentBranch === 'master') && hasOrigin;
+
+expect(
+  mainIsLocked
+    ? 'guard-git blocks a commit on published main'
+    : `guard-git allows a commit on feature branch '${currentBranch}'`,
+  {
+    hook: 'guard-git.mjs',
+    payload: bash('git commit -m "feat(catalog): add variant matrix"'),
+    want: mainIsLocked ? BLOCK : ALLOW,
+    mustSay: mainIsLocked ? 'reviewed pull request' : undefined,
+  },
+);
 
 expect('guard-git blocks deleting main on the remote', {
   hook: 'guard-git.mjs',
