@@ -1,0 +1,20 @@
+# Prettier is configured with endOfLine: 'lf'. Without this, Git's autocrlf on Windows
+# rewrites the working copy to CRLF on checkout and `pnpm format:check` fails on a clean
+# clone — on the developer's machine but not in CI, which is the worst way to find out.
+* text=auto eol=lf
+
+# Binary files must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# Generated — collapse in diffs and exclude from language stats.
+pnpm-lock.yaml linguist-generated=true -diff
+*.generated.ts linguist-generated=true
