@@ -10,3 +10,7 @@ test-results/
 .turbo/
 pnpm-lock.yaml
 *.tsbuildinfo
+
+# prisma format is the canonical formatter for schema files; prettier has no parser
+# for them. Formatted as part of the api package's lint step instead.
+*.prisma
