@@ -119,6 +119,16 @@ describe('offsetSkip', () => {
   it('does not skip anything on the first page', () => {
     expect(offsetSkip({ page: 1, pageSize: 50 })).toBe(0);
   });
+
+  // Unguarded, page 0 yields skip -24, which Prisma rejects at the driver with a far
+  // less obvious message than this one.
+  it.each([0, -1])('rejects a page of %i rather than returning a negative skip', (page) => {
+    expect(() => offsetSkip({ page, pageSize: 24 })).toThrow(RangeError);
+  });
+
+  it('rejects a non-positive page size', () => {
+    expect(() => offsetSkip({ page: 1, pageSize: 0 })).toThrow(RangeError);
+  });
 });
 
 describe('totalPages', () => {

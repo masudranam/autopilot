@@ -84,7 +84,9 @@ export interface OffsetPaginated<T> {
  * off-by-one there is easy to write and hard to notice, because page 1 looks correct
  * either way.
  */
-export function offsetSkip(query: { page: number; pageSize: number }): number {
+export function offsetSkip(query: OffsetQuery): number {
+  if (query.page < 1) throw new RangeError('page is 1-based; received ' + String(query.page));
+  if (query.pageSize <= 0) throw new RangeError('pageSize must be positive');
   return (query.page - 1) * query.pageSize;
 }
 
