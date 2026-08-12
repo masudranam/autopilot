@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": true,
+    // Inside dist/, which turbo.json tracks as this task's output — the tsbuildinfo
+    // outside it caused the silent empty-build cache bug fixed in #57.
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
+}

@@ -1,0 +1,739 @@
+// Domain schema — SPEC.md §5.
+//
+// Conventions (from .claude/rules/30-prisma.md):
+//   - ids are uuid(7): time-ordered, so they index well
+//   - createdAt/updatedAt on every table
+//   - money is Int minor units + a 3-letter currency (invariant I1) — never Float/Decimal
+//   - every FK indexed, every relation has an explicit onDelete
+//   - optimistic concurrency via `version` where rows are contended (inventory)
+//
+// Prisma 7: connection config lives in prisma.config.ts, not here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------- enums
+
+enum Role {
+  CUSTOMER
+  SUPPORT
+  ADMIN
+
+  @@map("role")
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("product_status")
+}
+
+enum CheckoutStatus {
+  STARTED
+  ADDRESS_SET
+  SHIPPING_SELECTED
+  PAYMENT_PENDING
+  CONFIRMED
+  FAILED
+  EXPIRED
+
+  @@map("checkout_status")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+  REFUNDED
+
+  @@map("order_status")
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  DECLINED
+  FAILED
+
+  @@map("payment_status")
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+
+  @@map("refund_status")
+}
+
+enum ShipmentStatus {
+  PREPARING
+  DISPATCHED
+  DELIVERED
+
+  @@map("shipment_status")
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  RECEIVED
+  REFUNDED
+
+  @@map("return_status")
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("review_status")
+}
+
+enum PromotionType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_SHIPPING
+
+  @@map("promotion_type")
+}
+
+enum ShippingRateType {
+  FLAT
+  WEIGHT_BANDED
+  FREE_OVER_THRESHOLD
+
+  @@map("shipping_rate_type")
+}
+
+enum AddressKind {
+  SHIPPING
+  BILLING
+
+  @@map("address_kind")
+}
+
+// ---------------------------------------------------------------- identity
+
+model User {
+  id              String    @id @default(uuid(7))
+  email           String    @unique // stored lowercased; normalisation happens in the service (F7)
+  passwordHash    String    @map("password_hash")
+  firstName       String    @map("first_name")
+  lastName        String    @map("last_name")
+  role            Role      @default(CUSTOMER)
+  emailVerifiedAt DateTime? @map("email_verified_at")
+
+  sessions      Session[]
+  addresses     Address[]
+  orders        Order[]
+  reviews       Review[]
+  wishlistItems WishlistItem[]
+  cart          Cart?
+  auditEntries  AuditLog[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Session {
+  id               String    @id @default(uuid(7))
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String    @map("user_id")
+  // The refresh token itself is never stored — only its hash (rules/60-security.md).
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  // Rotated tokens form a family; reuse of a rotated token revokes the family (F8/AC3).
+  family           String
+  device           String?
+  ip               String?
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([family])
+  @@map("sessions")
+}
+
+model Address {
+  id         String      @id @default(uuid(7))
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String      @map("user_id")
+  kind       AddressKind
+  isDefault  Boolean     @default(false) @map("is_default")
+  fullName   String      @map("full_name")
+  line1      String
+  line2      String?
+  city       String
+  region     String?
+  postalCode String      @map("postal_code")
+  country    String // ISO 3166-1 alpha-2
+
+  ordersShipping Order[] @relation("shippingAddress")
+  ordersBilling  Order[] @relation("billingAddress")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ---------------------------------------------------------------- catalogue
+
+model Category {
+  id        String     @id @default(uuid(7))
+  slug      String     @unique
+  name      String
+  sortOrder Int        @default(0) @map("sort_order")
+  parent    Category?  @relation("categoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  parentId  String?    @map("parent_id")
+  children  Category[] @relation("categoryTree")
+  products  Product[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+model Brand {
+  id       String    @id @default(uuid(7))
+  slug     String    @unique
+  name     String
+  products Product[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("brands")
+}
+
+model Product {
+  id          String        @id @default(uuid(7))
+  slug        String        @unique
+  name        String
+  description String
+  status      ProductStatus @default(DRAFT)
+  category    Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  categoryId  String        @map("category_id")
+  brand       Brand         @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  brandId     String        @map("brand_id")
+
+  options  ProductOption[]
+  variants ProductVariant[]
+  media    MediaAsset[]
+  reviews  Review[]
+  wishedBy WishlistItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([status])
+  @@map("products")
+}
+
+model ProductOption {
+  id        String               @id @default(uuid(7))
+  product   Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String               @map("product_id")
+  name      String // e.g. "Size", "Colour"
+  position  Int                  @default(0)
+  values    ProductOptionValue[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productId, name])
+  @@index([productId])
+  @@map("product_options")
+}
+
+model ProductOptionValue {
+  id       String        @id @default(uuid(7))
+  option   ProductOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  optionId String        @map("option_id")
+  value    String // e.g. "M", "Black"
+  position Int           @default(0)
+
+  variants ProductVariant[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([optionId, value])
+  @@index([optionId])
+  @@map("product_option_values")
+}
+
+model ProductVariant {
+  id          String  @id @default(uuid(7))
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId   String  @map("product_id")
+  sku         String  @unique
+  // Weight drives weight-banded shipping rates (F29).
+  weightGrams Int     @default(0) @map("weight_grams")
+
+  optionValues ProductOptionValue[]
+  inventory    InventoryItem?
+  prices       Price[]
+  cartLines    CartLine[]
+  orderLines   OrderLine[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model MediaAsset {
+  id         String  @id @default(uuid(7))
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String  @map("product_id")
+  storageKey String  @unique @map("storage_key") // object key in MinIO/S3
+  // Alt text is required at the API, not just the UI — accessibility is an AC (F16/AC3).
+  altText    String  @map("alt_text")
+  position   Int     @default(0)
+  isPrimary  Boolean @default(false) @map("is_primary")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([productId])
+  @@map("media_assets")
+}
+
+// ---------------------------------------------------------------- inventory
+
+model InventoryItem {
+  id        String         @id @default(uuid(7))
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variantId String         @unique @map("variant_id")
+  onHand    Int            @default(0) @map("on_hand")
+  reserved  Int            @default(0)
+  // Optimistic concurrency: updates are conditional on version, so two parallel
+  // reservations for the last unit cannot both win (F17/AC2, docs/architecture.md §3).
+  version   Int            @default(0)
+
+  reservations StockReservation[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("inventory_items")
+}
+
+model StockReservation {
+  id                String           @id @default(uuid(7))
+  inventoryItem     InventoryItem    @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  inventoryItemId   String           @map("inventory_item_id")
+  checkoutSession   CheckoutSession? @relation(fields: [checkoutSessionId], references: [id], onDelete: SetNull)
+  checkoutSessionId String?          @map("checkout_session_id")
+  quantity          Int
+  expiresAt         DateTime         @map("expires_at")
+  committedAt       DateTime?        @map("committed_at")
+  releasedAt        DateTime?        @map("released_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([inventoryItemId])
+  @@index([checkoutSessionId])
+  @@index([expiresAt]) // the expiry job scans by this
+  @@map("stock_reservations")
+}
+
+// ---------------------------------------------------------------- pricing
+
+model PriceList {
+  id       String  @id @default(uuid(7))
+  name     String  @unique
+  // Highest priority wins; resolution must be deterministic (F44/AC2).
+  priority Int     @default(0)
+  isActive Boolean @default(true) @map("is_active")
+  prices   Price[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("price_lists")
+}
+
+model Price {
+  id          String         @id @default(uuid(7))
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variantId   String         @map("variant_id")
+  priceList   PriceList      @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  priceListId String         @map("price_list_id")
+  amountMinor Int            @map("amount_minor") // integer minor units — invariant I1
+  currency    String // ISO 4217
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([variantId, priceListId, currency])
+  @@index([priceListId])
+  @@index([variantId])
+  @@map("prices")
+}
+
+model Promotion {
+  id             String        @id @default(uuid(7))
+  name           String
+  type           PromotionType
+  // Meaning depends on type: percentage in basis-of-100 for PERCENTAGE,
+  // amountMinor for FIXED_AMOUNT, unused for FREE_SHIPPING.
+  percentOff     Int?          @map("percent_off")
+  amountMinorOff Int?          @map("amount_minor_off")
+  currency       String? // required when amountMinorOff is set
+  startsAt       DateTime      @map("starts_at")
+  endsAt         DateTime      @map("ends_at")
+  isActive       Boolean       @default(true) @map("is_active")
+  coupons        Coupon[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([startsAt, endsAt])
+  @@map("promotions")
+}
+
+model Coupon {
+  id              String    @id @default(uuid(7))
+  promotion       Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotionId     String    @map("promotion_id")
+  code            String    @unique
+  maxRedemptions  Int?      @map("max_redemptions")
+  maxPerCustomer  Int?      @map("max_per_customer")
+  redemptionCount Int       @default(0) @map("redemption_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([promotionId])
+  @@map("coupons")
+}
+
+// ---------------------------------------------------------------- cart & checkout
+
+model Cart {
+  id               String            @id @default(uuid(7))
+  // Null for guest carts; the cookie token identifies those (F24).
+  user             User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String?           @unique @map("user_id")
+  // Signed cookie token for guest carts. Unique so a token maps to exactly one cart.
+  guestToken       String?           @unique @map("guest_token")
+  currency         String            @default("USD")
+  expiresAt        DateTime?         @map("expires_at")
+  lines            CartLine[]
+  checkoutSessions CheckoutSession[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("carts")
+}
+
+model CartLine {
+  id              String         @id @default(uuid(7))
+  cart            Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cartId          String         @map("cart_id")
+  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  variantId       String         @map("variant_id")
+  quantity        Int
+  // Snapshot of the unit price when added; re-validated on every cart operation (F26).
+  unitAmountMinor Int            @map("unit_amount_minor")
+  currency        String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
+  @@map("cart_lines")
+}
+
+model CheckoutSession {
+  id                  String         @id @default(uuid(7))
+  cart                Cart           @relation(fields: [cartId], references: [id], onDelete: Restrict)
+  cartId              String         @map("cart_id")
+  status              CheckoutStatus @default(STARTED)
+  // Prices are frozen at session creation (F28/AC2); totals live here, not on the cart.
+  currency            String
+  subtotalMinor       Int            @default(0) @map("subtotal_minor")
+  discountMinor       Int            @default(0) @map("discount_minor")
+  shippingMinor       Int            @default(0) @map("shipping_minor")
+  taxMinor            Int            @default(0) @map("tax_minor")
+  totalMinor          Int            @default(0) @map("total_minor")
+  shippingAddressJson Json?          @map("shipping_address_json")
+  billingAddressJson  Json?          @map("billing_address_json")
+  shippingRate        ShippingRate?  @relation(fields: [shippingRateId], references: [id], onDelete: SetNull)
+  shippingRateId      String?        @map("shipping_rate_id")
+  expiresAt           DateTime       @map("expires_at")
+
+  reservations StockReservation[]
+  order        Order?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([cartId])
+  @@index([status, expiresAt]) // the expiry job scans by this
+  @@index([shippingRateId])
+  @@map("checkout_sessions")
+}
+
+// ---------------------------------------------------------------- orders
+
+model Order {
+  id                String          @id @default(uuid(7))
+  number            String          @unique // human-facing, e.g. "AE-10042"
+  user              User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId            String          @map("user_id")
+  status            OrderStatus     @default(PENDING)
+  checkoutSession   CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Restrict)
+  checkoutSessionId String          @unique @map("checkout_session_id")
+
+  currency      String
+  subtotalMinor Int    @map("subtotal_minor")
+  discountMinor Int    @map("discount_minor")
+  shippingMinor Int    @map("shipping_minor")
+  taxMinor      Int    @map("tax_minor")
+  totalMinor    Int    @map("total_minor")
+
+  shippingAddress   Address? @relation("shippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  shippingAddressId String?  @map("shipping_address_id")
+  billingAddress    Address? @relation("billingAddress", fields: [billingAddressId], references: [id], onDelete: SetNull)
+  billingAddressId  String?  @map("billing_address_id")
+
+  lines     OrderLine[]
+  payments  Payment[]
+  shipments Shipment[]
+  returns   ReturnRequest[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([status])
+  @@index([shippingAddressId])
+  @@index([billingAddressId])
+  @@map("orders")
+}
+
+model OrderLine {
+  id               String         @id @default(uuid(7))
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String         @map("order_id")
+  variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  variantId        String         @map("variant_id")
+  // Denormalised so the order survives catalogue edits exactly as sold.
+  productName      String         @map("product_name")
+  sku              String
+  quantity         Int
+  unitAmountMinor  Int            @map("unit_amount_minor")
+  totalAmountMinor Int            @map("total_amount_minor")
+  currency         String
+
+  returnRequests ReturnRequest[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_lines")
+}
+
+model Payment {
+  id               String        @id @default(uuid(7))
+  order            Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderId          String        @map("order_id")
+  status           PaymentStatus @default(PENDING)
+  provider         String // 'mock' | 'stripe'
+  providerIntentId String?       @unique @map("provider_intent_id")
+  amountMinor      Int           @map("amount_minor")
+  currency         String
+  // Idempotency: money-moving calls carry a key; replays return the original (I6).
+  idempotencyKey   String?       @unique @map("idempotency_key")
+
+  refunds Refund[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([orderId])
+  @@map("payments")
+}
+
+model Refund {
+  id               String       @id @default(uuid(7))
+  payment          Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  paymentId        String       @map("payment_id")
+  status           RefundStatus @default(PENDING)
+  amountMinor      Int          @map("amount_minor")
+  currency         String
+  reason           String?
+  providerRefundId String?      @unique @map("provider_refund_id")
+  idempotencyKey   String?      @unique @map("idempotency_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+model Shipment {
+  id             String         @id @default(uuid(7))
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId        String         @map("order_id")
+  status         ShipmentStatus @default(PREPARING)
+  carrier        String?
+  trackingNumber String?        @map("tracking_number")
+  // Which lines and quantities this shipment covers — enables partial shipments (F36).
+  linesJson      Json           @map("lines_json")
+  dispatchedAt   DateTime?      @map("dispatched_at")
+  deliveredAt    DateTime?      @map("delivered_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([orderId])
+  @@map("shipments")
+}
+
+model ReturnRequest {
+  id          String       @id @default(uuid(7))
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId     String       @map("order_id")
+  orderLine   OrderLine    @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  orderLineId String       @map("order_line_id")
+  status      ReturnStatus @default(REQUESTED)
+  quantity    Int
+  reason      String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([orderId])
+  @@index([orderLineId])
+  @@map("return_requests")
+}
+
+// ---------------------------------------------------------------- shipping
+
+model ShippingZone {
+  id        String         @id @default(uuid(7))
+  name      String         @unique
+  // ISO 3166-1 alpha-2 codes this zone serves.
+  countries String[]
+  rates     ShippingRate[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("shipping_zones")
+}
+
+model ShippingRate {
+  id                 String           @id @default(uuid(7))
+  zone               ShippingZone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  zoneId             String           @map("zone_id")
+  name               String
+  type               ShippingRateType
+  amountMinor        Int              @map("amount_minor")
+  currency           String
+  // WEIGHT_BANDED: applies up to this weight. FREE_OVER_THRESHOLD: free above this total.
+  maxWeightGrams     Int?             @map("max_weight_grams")
+  freeOverTotalMinor Int?             @map("free_over_total_minor")
+
+  checkoutSessions CheckoutSession[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([zoneId])
+  @@map("shipping_rates")
+}
+
+// ---------------------------------------------------------------- engagement
+
+model Review {
+  id        String       @id @default(uuid(7))
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String       @map("product_id")
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String       @map("user_id")
+  status    ReviewStatus @default(PENDING)
+  rating    Int // 1..5, validated at the contract layer
+  title     String
+  body      String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // One review per customer per product (F41/AC4).
+  @@unique([productId, userId])
+  @@index([userId])
+  @@index([productId, status])
+  @@map("reviews")
+}
+
+model WishlistItem {
+  id        String  @id @default(uuid(7))
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String  @map("user_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String  @map("product_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, productId])
+  @@index([productId])
+  @@map("wishlist_items")
+}
+
+// ---------------------------------------------------------------- audit
+
+model AuditLog {
+  id         String  @id @default(uuid(7))
+  actor      User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorId    String? @map("actor_id")
+  action     String // e.g. "product.publish", "order.transition"
+  entityType String  @map("entity_type")
+  entityId   String  @map("entity_id")
+  beforeJson Json?   @map("before_json")
+  afterJson  Json?   @map("after_json")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

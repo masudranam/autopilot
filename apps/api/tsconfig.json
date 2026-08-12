@@ -1,0 +1,11 @@
+{
+  "extends": "@repo/config/tsconfig-node",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "incremental": false,
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "generated/**/*.ts", "prisma.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -26,6 +26,33 @@ pnpm --filter @repo/api exec prisma migrate dev --name <descriptive_name>
   deliberately — the default silently becomes a data-integrity decision nobody made.
 - Enums live in the schema and are generated into `@repo/contracts`.
 
+## Database naming — snake_case in the DB, camelCase in code
+
+The Prisma model layer is camelCase/PascalCase; the database itself is snake_case. Every mapping is
+explicit — never rely on names happening to coincide:
+
+- **Every model** carries `@@map("plural_snake")`: `model OrderLine` → `@@map("order_lines")`. Table
+  names are plural.
+- **Every camelCase column** carries `@map("snake_case")`:
+
+  ```prisma
+  discountMinor Int @default(0) @map("discount_minor")
+  userId        String          @map("user_id")
+  ```
+
+  Single-word lowercase fields (`email`, `currency`, `role`) need no `@map` — they are already
+  identical in both.
+
+- **Every enum type** carries `@@map("snake_case")`: `enum ProductStatus` →
+  `@@map("product_status")`.
+
+Why: raw SQL, `psql` sessions, BI tools and DBAs all see the database directly, and `orderLine`
+column names in Postgres read as a mistake. Adding the mapping later is a full-schema rename
+migration — do it from the first migration.
+
+Enforced by `schema-invariants.spec.ts`: a model without `@@map` or a camelCase scalar column
+without `@map` fails the test suite, so this rule cannot silently regress.
+
 ## Query discipline
 
 - **N+1 is a bug, not a performance nicety.** Use `include` / `select`, and add a query-count test

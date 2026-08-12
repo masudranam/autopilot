@@ -81,9 +81,10 @@ const unguarded = [];
 for (const variable of variables) {
   const name = variable.Name;
   const required = variable.Required === true;
-  // AlternateValue is the `:+` form: unset deliberately means empty. DefaultValue
-  // non-empty means `:-`/`-` supplied a fallback.
-  const hasFallback = Boolean(variable.DefaultValue) || Boolean(variable.AlternateValue);
+  // PresenceValue is what the oracle emits for the `:+` form (verified against the
+  // JSON output — an earlier draft read a nonexistent `AlternateValue` field, found
+  // by pr-reviewer). DefaultValue non-empty means `:-`/`-` supplied a fallback.
+  const hasFallback = Boolean(variable.DefaultValue) || Boolean(variable.PresenceValue);
 
   if (!documented.has(name)) missing.push({ name, required });
   if (!hasFallback && !required) unguarded.push(name);
@@ -111,6 +112,20 @@ if (unguarded.length) {
     `\nCompose references with neither a default nor a :? guard: ${unguarded.join(', ')}\n` +
       'Use ${VAR:-sensible-default} so `pnpm infra:up` works before anyone writes a .env,\n' +
       'or ${VAR:?why it is required} to fail loudly instead of silently substituting "".',
+  );
+}
+
+// env_file: would feed variables through a channel the oracle's --variables output
+// does not cover, quietly blinding this check to everything such a file supplies.
+// Fail loudly instead — this guard existed once, was silently lost in the oracle
+// rewrite, and pr-reviewer caught the regression.
+const rawCompose = readFileSync(composeFile, 'utf8');
+if (/^\s*env_file\s*:/m.test(rawCompose)) {
+  failed = true;
+  console.error(
+    '\ninfra/docker-compose.yml uses env_file. This check only validates inline\n' +
+      'interpolation, so it would report green while blind to everything that file\n' +
+      'supplies. Extend this script before introducing one.',
   );
 }
 

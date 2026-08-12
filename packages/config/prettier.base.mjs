@@ -19,9 +19,9 @@ export default {
       files: ['*.yml', '*.yaml'],
       options: { singleQuote: false },
     },
-    {
-      files: '*.prisma',
-      options: { parser: 'prisma' },
-    },
+    // *.prisma is deliberately absent: `prisma format` is the canonical formatter for
+    // schema files and Prettier has no built-in parser for them — an override here
+    // pointed at a nonexistent parser and broke format:check the day the first
+    // schema.prisma appeared. The files are excluded via .prettierignore instead.
   ],
 };
