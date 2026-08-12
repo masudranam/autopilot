@@ -73,7 +73,10 @@ if (existsSync(verifiedMarker)) {
 
 if (lastVerified > lastEdit) process.exit(0);
 
-const preview = sourceChanges.slice(0, 8).map((f) => `  ${f}`).join('\n');
+const preview = sourceChanges
+  .slice(0, 8)
+  .map((f) => `  ${f}`)
+  .join('\n');
 const more = sourceChanges.length > 8 ? `\n  …and ${sourceChanges.length - 8} more` : '';
 
 block(

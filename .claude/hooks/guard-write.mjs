@@ -28,14 +28,19 @@ if (/(^|\/)\.env($|\.)/.test(lower) && !lower.endsWith('.env.example')) {
   );
 }
 
-if (/\.(pem|key|p12|pfx)$/.test(lower) || /(^|\/)id_rsa/.test(lower) || /(^|\/)secrets\//.test(lower)) {
+if (
+  /\.(pem|key|p12|pfx)$/.test(lower) ||
+  /(^|\/)id_rsa/.test(lower) ||
+  /(^|\/)secrets\//.test(lower)
+) {
   block(`BLOCKED: writing credential material at '${path}'.`);
 }
 
 // ---------------------------------------------------------------- 2 · contracts belong in one place
 
 const isAppSource = /^apps\/[^/]+\/.*\.(ts|tsx)$/.test(lower);
-const isTest = /\.(spec|test|e2e-spec)\.tsx?$/.test(lower) || /(^|\/)(test|tests|__tests__)\//.test(lower);
+const isTest =
+  /\.(spec|test|e2e-spec)\.tsx?$/.test(lower) || /(^|\/)(test|tests|__tests__)\//.test(lower);
 
 if (isAppSource && !isTest && content) {
   // Heuristic, deliberately narrow: a type whose name reads like an API payload.

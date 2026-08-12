@@ -42,12 +42,16 @@ function expect(name, { hook, payload, want, mustSay }) {
   const wanted = want === BLOCK ? 'BLOCK' : 'ALLOW';
 
   if (verdict !== wanted) {
-    failures.push(`${name}\n    wanted ${wanted}, got ${verdict}\n    stderr: ${stderr.trim().slice(0, 200)}`);
+    failures.push(
+      `${name}\n    wanted ${wanted}, got ${verdict}\n    stderr: ${stderr.trim().slice(0, 200)}`,
+    );
     return;
   }
 
   if (mustSay && !stderr.includes(mustSay)) {
-    failures.push(`${name}\n    blocked correctly but the message never mentions "${mustSay}"\n    stderr: ${stderr.trim().slice(0, 200)}`);
+    failures.push(
+      `${name}\n    blocked correctly but the message never mentions "${mustSay}"\n    stderr: ${stderr.trim().slice(0, 200)}`,
+    );
     return;
   }
 
@@ -55,7 +59,10 @@ function expect(name, { hook, payload, want, mustSay }) {
 }
 
 const bash = (command) => ({ tool_name: 'Bash', tool_input: { command } });
-const write = (file_path, content = '') => ({ tool_name: 'Write', tool_input: { file_path, content } });
+const write = (file_path, content = '') => ({
+  tool_name: 'Write',
+  tool_input: { file_path, content },
+});
 
 // ============================================================ guard-write
 
@@ -108,7 +115,10 @@ expect('guard-write allows a plainly-named local view model in an app', {
 
 expect('guard-write blocks generated files', {
   hook: 'guard-write.mjs',
-  payload: write(join(projectDir, 'packages/contracts/src/enums.generated.ts'), 'export const X = 1;'),
+  payload: write(
+    join(projectDir, 'packages/contracts/src/enums.generated.ts'),
+    'export const X = 1;',
+  ),
   want: BLOCK,
 });
 
@@ -202,7 +212,10 @@ expect('MERGE GATE: blocks a PASS recorded against a different commit', {
 });
 
 // A PASS stamped with the real current HEAD is the only thing that opens the gate.
-const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf8' }).stdout?.trim();
+const head = spawnSync('git', ['rev-parse', 'HEAD'], {
+  cwd: projectDir,
+  encoding: 'utf8',
+}).stdout?.trim();
 
 if (head) {
   writeFileSync(

@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # pnpm's interactive reporter hangs on a non-TTY stdout. CI=1 is set by Actions
+  # already, but the explicit reporter flag is what actually makes it safe.
+  PNPM_FLAGS: --reporter=append-only
+
+jobs:
+  gate:
+    name: Verify gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ecommerce
+          POSTGRES_PASSWORD: ecommerce_dev_password
+          POSTGRES_DB: ecommerce_test
+        ports: ["5442:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ecommerce -d ecommerce_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6389:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://ecommerce:ecommerce_dev_password@localhost:5442/ecommerce_test?schema=public
+      REDIS_URL: redis://localhost:6389
+      # The mock payment provider means the full checkout suite runs with no secrets.
+      PAYMENT_PROVIDER: mock
+      JWT_ACCESS_SECRET: ci_access_secret_not_used_outside_ci
+      JWT_REFRESH_SECRET: ci_refresh_secret_not_used_outside_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.20.0
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile $PNPM_FLAGS
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  migrations-replay:
+    name: Migrations replay from empty
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ecommerce
+          POSTGRES_PASSWORD: ecommerce_dev_password
+          POSTGRES_DB: ecommerce_replay
+        ports: ["5442:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ecommerce -d ecommerce_replay"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://ecommerce:ecommerce_dev_password@localhost:5442/ecommerce_replay?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.20.0
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile $PNPM_FLAGS
+
+      # Skips cleanly until apps/api exists (E0/F3). Once it does, this is invariant I7.
+      - name: Migrate from empty
+        run: |
+          if [ -f apps/api/prisma/schema.prisma ]; then
+            pnpm db:migrate
+          else
+            echo "apps/api not scaffolded yet — nothing to replay"
+          fi
+
+      - name: Seed is idempotent
+        run: |
+          if [ -f apps/api/prisma/seed.ts ]; then
+            pnpm db:seed
+            pnpm db:seed
+          else
+            echo "no seed yet"
+          fi
+
+  harness:
+    name: Harness guarantees
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.20.0
+
+      # The merge gate is only as good as these hooks. If they stop blocking, the
+      # whole review pipeline becomes decorative — so CI checks them too.
+      - name: Hook guarantees hold
+        run: node .claude/hooks/__tests__/run-hook-tests.mjs
+
+      - name: No skipped or focused tests on main (I9)
+        run: |
+          if grep -rnE '\b(describe|it|test)\.(only|skip)\b|\bx(it|describe)\b' \
+               --include='*.spec.ts' --include='*.test.ts' --include='*.e2e-spec.ts' \
+               --include='*.spec.tsx' --include='*.test.tsx' . ; then
+            echo "::error::Skipped or focused tests are not allowed (SPEC.md I9)"
+            exit 1
+          fi
+          echo "no .only / .skip found"

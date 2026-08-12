@@ -1,19 +1,15 @@
 # Agentic Ecommerce
 
-A modern ecommerce platform built entirely through an automated loop:
-GitHub issue → branch → implement → verify → PR → subagent review → auto-merge on green.
+A modern ecommerce platform built entirely through an automated loop: GitHub issue → branch →
+implement → verify → PR → subagent review → auto-merge on green.
 
 [SPEC.md](SPEC.md) is the source of truth. [docs/architecture.md](docs/architecture.md) explains how
 the system fits together. Amend the spec in the same PR whenever reality diverges from it.
 
 ## Rules
 
-@.claude/rules/00-workflow.md
-@.claude/rules/10-backend.md
-@.claude/rules/20-contracts.md
-@.claude/rules/30-prisma.md
-@.claude/rules/40-frontend.md
-@.claude/rules/50-testing.md
+@.claude/rules/00-workflow.md @.claude/rules/10-backend.md @.claude/rules/20-contracts.md
+@.claude/rules/30-prisma.md @.claude/rules/40-frontend.md @.claude/rules/50-testing.md
 @.claude/rules/60-security.md
 
 ## The three rules that override everything
@@ -54,12 +50,12 @@ These cost real time when forgotten:
 
 Offset from the defaults because 5432, 5433 and 4200 are already taken on this machine.
 
-| Service | Port | | Service | Port |
-|---|---|---|---|---|
-| Storefront | 3000 | | PostgreSQL | 5442 |
-| API | 3001 | | Redis | 6389 |
-| Admin | 3002 | | Mailpit SMTP / UI | 1026 / 8026 |
-| | | | MinIO API / console | 9010 / 9011 |
+| Service    | Port |     | Service             | Port        |
+| ---------- | ---- | --- | ------------------- | ----------- |
+| Storefront | 3000 |     | PostgreSQL          | 5442        |
+| API        | 3001 |     | Redis               | 6389        |
+| Admin      | 3002 |     | Mailpit SMTP / UI   | 1026 / 8026 |
+|            |      |     | MinIO API / console | 9010 / 9011 |
 
 ## Common commands
 

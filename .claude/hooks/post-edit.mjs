@@ -30,7 +30,12 @@ try {
   /* the marker is an optimisation, not a requirement */
 }
 
-const prettier = join(projectDir, 'node_modules', '.bin', process.platform === 'win32' ? 'prettier.cmd' : 'prettier');
+const prettier = join(
+  projectDir,
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'prettier.cmd' : 'prettier',
+);
 if (!existsSync(prettier)) process.exit(0);
 
 try {
@@ -44,6 +49,10 @@ try {
 } catch (error) {
   // A syntax error means prettier cannot parse it — worth surfacing, since the file
   // is almost certainly broken.
-  const detail = String(error.stderr || error.message || '').trim().split('\n').slice(0, 4).join('\n');
+  const detail = String(error.stderr || error.message || '')
+    .trim()
+    .split('\n')
+    .slice(0, 4)
+    .join('\n');
   console.log(`prettier could not format ${path}:\n${detail}`);
 }

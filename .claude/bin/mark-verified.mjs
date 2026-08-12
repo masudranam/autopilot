@@ -23,6 +23,10 @@ const projectDir = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const file = join(projectDir, '.claude', 'state', 'verified.json');
 mkdirSync(dirname(file), { recursive: true });
 
-writeFileSync(file, `${JSON.stringify({ result, at: new Date().toISOString() }, null, 2)}\n`, 'utf8');
+writeFileSync(
+  file,
+  `${JSON.stringify({ result, at: new Date().toISOString() }, null, 2)}\n`,
+  'utf8',
+);
 
 console.log(`verify recorded: ${result}`);

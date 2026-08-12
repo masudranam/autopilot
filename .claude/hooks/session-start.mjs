@@ -35,7 +35,9 @@ if (!branch) {
 
 const dirty = run('git', ['status', '--porcelain']);
 const dirtyCount = dirty ? dirty.split('\n').filter(Boolean).length : 0;
-lines.push(`branch      ${branch}${branch === 'main' ? '  (feature work needs its own branch)' : ''}`);
+lines.push(
+  `branch      ${branch}${branch === 'main' ? '  (feature work needs its own branch)' : ''}`,
+);
 lines.push(`working set ${dirtyCount === 0 ? 'clean' : `${dirtyCount} uncommitted file(s)`}`);
 
 // ---- github ----------------------------------------------------------------
@@ -43,7 +45,16 @@ const ghUser = run('gh', ['api', 'user', '--jq', '.login']);
 if (!ghUser) {
   lines.push('github      NOT AUTHENTICATED — run: gh auth login');
 } else {
-  const prs = run('gh', ['pr', 'list', '--state', 'open', '--json', 'number,title,headRefName', '--limit', '10']);
+  const prs = run('gh', [
+    'pr',
+    'list',
+    '--state',
+    'open',
+    '--json',
+    'number,title,headRefName',
+    '--limit',
+    '10',
+  ]);
   let openPrs = [];
   try {
     openPrs = JSON.parse(prs || '[]');
@@ -77,7 +88,17 @@ if (!ghUser) {
 }
 
 // ---- infrastructure --------------------------------------------------------
-const ps = run('docker', ['compose', '-f', 'infra/docker-compose.yml', 'ps', '--services', '--filter', 'status=running']);
-lines.push(`infra       ${ps ? ps.split('\n').filter(Boolean).join(', ') : 'down — run: pnpm infra:up'}`);
+const ps = run('docker', [
+  'compose',
+  '-f',
+  'infra/docker-compose.yml',
+  'ps',
+  '--services',
+  '--filter',
+  'status=running',
+]);
+lines.push(
+  `infra       ${ps ? ps.split('\n').filter(Boolean).join(', ') : 'down — run: pnpm infra:up'}`,
+);
 
 console.log(`\nagentic-ecommerce\n${'-'.repeat(60)}\n${lines.join('\n')}\n`);

@@ -12,7 +12,15 @@
  * Prompt-level instructions get forgotten across a 54-PR unattended run. This does not.
  */
 import { execFileSync } from 'node:child_process';
-import { allow, block, commandOf, readPayload, readJsonIfExists, segments, statePath } from './_lib.mjs';
+import {
+  allow,
+  block,
+  commandOf,
+  readPayload,
+  readJsonIfExists,
+  segments,
+  statePath,
+} from './_lib.mjs';
 
 const payload = await readPayload();
 const command = commandOf(payload);
@@ -22,7 +30,10 @@ const parts = segments(command);
 
 function git(args) {
   try {
-    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return '';
   }
@@ -56,7 +67,10 @@ for (const part of parts) {
 // ---------------------------------------------------------------- 2 · destructive git
 
 for (const part of parts) {
-  if (/\bgit\b[\s\S]*\bpush\b/.test(part) && /(--force(?!-with-lease)|(?:^|\s)-f(?:\s|$))/.test(part)) {
+  if (
+    /\bgit\b[\s\S]*\bpush\b/.test(part) &&
+    /(--force(?!-with-lease)|(?:^|\s)-f(?:\s|$))/.test(part)
+  ) {
     block(
       `BLOCKED: force push.\n\n` +
         `Force pushing rewrites published history and can destroy a branch another\n` +
