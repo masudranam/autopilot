@@ -2,7 +2,12 @@
   "extends": "@repo/config/tsconfig-node",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+
+    // Typecheck only — no emit, so there is nothing to do incrementally. Leaving
+    // `incremental` on would drop a second .tsbuildinfo next to the build's and let
+    // the two invalidate each other.
+    "incremental": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

@@ -6,12 +6,17 @@ import { z } from 'zod';
  * `errors[]` appears only on validation failures. `traceId` is on every response and
  * correlates to the structured logs for that request.
  */
-export const problemDetailSchema = z.object({
+/**
+ * One field-level validation error. Named `fieldError` rather than `problemDetail`
+ * because a single character between `problemDetailSchema` and `problemDetailsSchema`
+ * is not enough distance between "one bad field" and "the whole RFC 9457 envelope".
+ */
+export const fieldErrorSchema = z.object({
   path: z.string(),
   message: z.string(),
 });
 
-export type ProblemDetail = z.infer<typeof problemDetailSchema>;
+export type FieldError = z.infer<typeof fieldErrorSchema>;
 
 export const problemDetailsSchema = z.object({
   type: z.url(),
@@ -20,7 +25,7 @@ export const problemDetailsSchema = z.object({
   detail: z.string().optional(),
   instance: z.string().optional(),
   traceId: z.string(),
-  errors: z.array(problemDetailSchema).optional(),
+  errors: z.array(fieldErrorSchema).optional(),
 });
 
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>;

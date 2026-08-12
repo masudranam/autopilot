@@ -41,6 +41,23 @@ describe('moneySchema', () => {
   it('rejects a negative amount where non-negative is required', () => {
     expect(() => nonNegativeMoneySchema.parse({ amountMinor: -1, currency: 'USD' })).toThrow();
   });
+
+  // length(3) alone accepts these. They then parse cleanly and throw RangeError
+  // inside Intl.NumberFormat, turning a client's bad input into a 500 where I3
+  // requires a 422 Problem Details.
+  it.each(['$$$', '1a3', '   ', 'a b', 'U$D'])(
+    'rejects %o, which is three characters but not a currency code',
+    (currency) => {
+      expect(() => moneySchema.parse({ amountMinor: 100, currency })).toThrow();
+    },
+  );
+
+  it('every currency it accepts is one Intl.NumberFormat can format', () => {
+    for (const currency of ['USD', 'eur', 'JPY', 'kwd', 'GBP']) {
+      const money = moneySchema.parse({ amountMinor: 1000, currency });
+      expect(() => formatMoney(money)).not.toThrow();
+    }
+  });
 });
 
 describe('minorUnitExponent', () => {
@@ -149,5 +166,12 @@ describe('percentageOf', () => {
 
   it('preserves the currency', () => {
     expect(percentageOf({ amountMinor: 1000, currency: 'JPY' }, 10).currency).toBe('JPY');
+  });
+
+  // -0 renders as "-$0.00" and fails toBe(0) despite being numerically zero.
+  it('never returns negative zero', () => {
+    const result = percentageOf(usd(-1), 10).amountMinor;
+    expect(Object.is(result, -0)).toBe(false);
+    expect(formatMoney(percentageOf(usd(-1), 10))).toBe('$0.00');
   });
 });

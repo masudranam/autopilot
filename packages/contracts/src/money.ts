@@ -4,9 +4,19 @@ import { z } from 'zod';
  * Money is an integer in the currency's minor unit, always paired with its currency.
  * Never a float — see docs/adr/0003-money-as-integer-minor-units.md (invariant I1).
  */
+export const currencySchema = z
+  .string()
+  .length(3)
+  .toUpperCase()
+  // The regex runs after the uppercase transform (string checks apply in declaration
+  // order), so it validates the normalised value. Without it `length(3)` alone accepts
+  // "$$$" and "1a3", which parse cleanly and then throw RangeError inside
+  // Intl.NumberFormat — turning a client's bad input into a 500 where I3 requires a 422.
+  .regex(/^[A-Z]{3}$/, 'Must be a three-letter ISO-4217 currency code');
+
 export const moneySchema = z.object({
   amountMinor: z.int(),
-  currency: z.string().length(3).toUpperCase(),
+  currency: currencySchema,
 });
 
 export type Money = z.infer<typeof moneySchema>;
@@ -103,7 +113,9 @@ export function multiplyMoney(money: Money, quantity: number): Money {
  */
 export function percentageOf(money: Money, percent: number): Money {
   const exact = (money.amountMinor * percent) / 100;
-  const rounded = Math.sign(exact) * Math.round(Math.abs(exact));
+  // `|| 0` normalises -0, which would otherwise render as "-$0.00" and fail a
+  // toBe(0) assertion despite being numerically zero.
+  const rounded = Math.sign(exact) * Math.round(Math.abs(exact)) || 0;
   return { amountMinor: rounded, currency: money.currency };
 }
 

@@ -4,6 +4,8 @@ import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
   cursorQuerySchema,
+  offsetPaginatedSchema,
+  offsetQuerySchema,
   pageInfoSchema,
   paginatedSchema,
   sortDirectionSchema,
@@ -61,6 +63,72 @@ describe('cursorQuerySchema', () => {
 
   it('passes a cursor through', () => {
     expect(cursorQuerySchema.parse({ cursor: 'abc' }).cursor).toBe('abc');
+  });
+
+  // `?limit=` is normal when a client clears a filter. Coercing "" to 0 would fail
+  // .positive() and 422 the request instead of falling back to the default.
+  it('treats an empty limit as absent rather than zero', () => {
+    expect(cursorQuerySchema.parse({ limit: '' }).limit).toBe(DEFAULT_PAGE_SIZE);
+  });
+
+  it('treats an empty cursor as absent', () => {
+    expect(cursorQuerySchema.parse({ cursor: '' }).cursor).toBeUndefined();
+  });
+});
+
+describe('offsetQuerySchema', () => {
+  it('defaults to the first page', () => {
+    const parsed = offsetQuerySchema.parse({});
+    expect(parsed.page).toBe(1);
+    expect(parsed.pageSize).toBe(DEFAULT_PAGE_SIZE);
+  });
+
+  it('coerces query strings', () => {
+    expect(offsetQuerySchema.parse({ page: '3', pageSize: '50' })).toEqual({
+      page: 3,
+      pageSize: 50,
+    });
+  });
+
+  it('treats empty values as absent', () => {
+    expect(offsetQuerySchema.parse({ page: '', pageSize: '' }).page).toBe(1);
+  });
+
+  it.each([0, -1, 1.5])('rejects a page of %s', (page) => {
+    expect(() => offsetQuerySchema.parse({ page })).toThrow();
+  });
+
+  it('caps pageSize like the cursor query does', () => {
+    expect(() => offsetQuerySchema.parse({ pageSize: MAX_PAGE_SIZE + 1 })).toThrow();
+  });
+});
+
+describe('offsetPaginatedSchema', () => {
+  const schema = offsetPaginatedSchema(z.object({ id: z.string() }));
+
+  it('accepts a well-formed offset page', () => {
+    const page = {
+      items: [{ id: 'a' }],
+      pageInfo: { page: 1, pageSize: 24, totalItems: 1, totalPages: 1 },
+    };
+    expect(schema.parse(page)).toEqual(page);
+  });
+
+  it('allows a genuinely empty result set', () => {
+    const page = {
+      items: [],
+      pageInfo: { page: 1, pageSize: 24, totalItems: 0, totalPages: 0 },
+    };
+    expect(schema.parse(page)).toEqual(page);
+  });
+
+  it('rejects a page number of zero — offset pages are 1-based', () => {
+    expect(() =>
+      schema.parse({
+        items: [],
+        pageInfo: { page: 0, pageSize: 24, totalItems: 0, totalPages: 0 },
+      }),
+    ).toThrow();
   });
 });
 

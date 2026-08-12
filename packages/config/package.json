@@ -12,6 +12,9 @@
     "./tsconfig-node": "./tsconfig.node.json",
     "./tsconfig-react": "./tsconfig.react.json"
   },
+  "scripts": {
+    "lint": "eslint ."
+  },
   "dependencies": {
     "@eslint/js": "9.39.5",
     "@next/eslint-plugin-next": "16.3.0",
