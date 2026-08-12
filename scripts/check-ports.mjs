@@ -47,15 +47,23 @@ function oursAlready() {
 
 const mine = oursAlready();
 
-function isFree(port) {
+function bindable(port, host) {
   return new Promise((resolve) => {
     const server = createServer();
     server.once('error', () => resolve(false));
     server.once('listening', () => server.close(() => resolve(true)));
-    // 0.0.0.0 — the same interface Docker publishes on. Binding only 127.0.0.1 would
-    // miss a squatter bound to a specific external address.
-    server.listen(port, '0.0.0.0');
+    server.listen(port, host);
   });
+}
+
+/**
+ * Probe both interfaces. On Windows, binding 0.0.0.0 succeeds even while another
+ * process holds 127.0.0.1 on the same port (unlike Linux, where it is EADDRINUSE),
+ * so a loopback-only squatter is invisible to a single wildcard probe — found by
+ * pr-reviewer on the first version of this check.
+ */
+async function isFree(port) {
+  return (await bindable(port, '0.0.0.0')) && (await bindable(port, '127.0.0.1'));
 }
 
 const taken = [];

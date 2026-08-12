@@ -8,16 +8,17 @@
  * their machine because their own `.env` already has it, and the next person to run
  * `pnpm infra:up` gets a subtly broken stack with no message.
  *
- * Parses the YAML and walks every string value rather than regexing the raw file.
- * The earlier regex version silently passed `${VAR:?required}` — the one form whose
- * whole purpose is to be mandatory — along with unbraced `$VAR`, `${VAR:+alt}`,
- * nested defaults and lowercase names. A check with blind spots is worse than none,
- * because it reports green over exactly the cases it cannot see.
+ * The variable list comes from `docker compose config --variables --format json` —
+ * Compose's OWN parser — not from re-implementing interpolation here. This file
+ * previously did that twice, and each version had blind spots its green output hid:
+ * the regex round missed `${VAR:?required}` outright, and the YAML-walking round
+ * missed nested `${A:-${B}}` while false-positive-ing on the `$$` escape. An oracle
+ * that ships with Compose cannot drift from what Compose actually does.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { load as parseYaml } from 'js-yaml';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..');
 const composeFile = join(root, 'infra', 'docker-compose.yml');
@@ -33,64 +34,37 @@ for (const [label, file] of [
   }
 }
 
-const raw = readFileSync(composeFile, 'utf8');
-const compose = parseYaml(raw);
-
-/**
- * Every interpolation form Compose supports.
- *
- *   ${VAR}  ${VAR:-d}  ${VAR-d}  ${VAR:?err}  ${VAR?err}  ${VAR:+alt}  ${VAR+alt}  $VAR
- *
- * Only `:-` / `-` supply a fallback. `:?` is the opposite — it is mandatory — so it
- * must never be treated as safely defaulted.
- */
-const BRACED = /\$\{([A-Za-z_][A-Za-z0-9_]*)(:?[-?+])?([^}]*)\}/g;
-const BARE = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
-
-const references = new Map(); // name -> { defaulted, required }
-
-function note(name, operator) {
-  const defaulted = operator === ':-' || operator === '-';
-  const required = operator === ':?' || operator === '?';
-  const previous = references.get(name);
-  references.set(name, {
-    defaulted: previous ? previous.defaulted && defaulted : defaulted,
-    required: previous ? previous.required || required : required,
-  });
+let variables;
+try {
+  const out = execFileSync(
+    'docker',
+    ['compose', '-f', composeFile, 'config', '--variables', '--format', 'json'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 },
+  );
+  variables = Object.values(JSON.parse(out));
+} catch (error) {
+  // Fail closed. A check that quietly passes when its oracle is unavailable reports
+  // green over exactly the drift it exists to catch.
+  console.error(
+    'check-env-example: could not run `docker compose config --variables`.\n' +
+      'The check needs the Docker CLI (the daemon itself is not required for config).\n\n' +
+      String(error.stderr || error.message)
+        .trim()
+        .split('\n')
+        .slice(0, 3)
+        .join('\n'),
+  );
+  process.exit(1);
 }
 
-function scanString(value) {
-  // Nested defaults such as ${A:-${B}} need the inner reference too, so scan the
-  // whole string for braced forms first, then the bare form on what is left.
-  let remaining = value;
-  for (const match of value.matchAll(BRACED)) {
-    note(match[1], match[2]);
-    if (match[3]) for (const inner of match[3].matchAll(BRACED)) note(inner[1], inner[2]);
-    remaining = remaining.split(match[0]).join(' ');
-  }
-  for (const match of remaining.matchAll(BARE)) note(match[1], undefined);
+if (variables.length === 0) {
+  console.error(
+    'check-env-example: Compose reports zero variables for infra/docker-compose.yml.\n' +
+      'Every service in this stack is parameterised, so an empty result means the\n' +
+      'oracle output changed shape — refusing to report success on it.',
+  );
+  process.exit(1);
 }
-
-const envFiles = [];
-
-function walk(node, path = []) {
-  if (typeof node === 'string') {
-    scanString(node);
-    return;
-  }
-  if (Array.isArray(node)) {
-    node.forEach((item, i) => walk(item, [...path, String(i)]));
-    return;
-  }
-  if (node && typeof node === 'object') {
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'env_file') envFiles.push(path.join('.') || 'root');
-      walk(value, [...path, key]);
-    }
-  }
-}
-
-walk(compose);
 
 const documented = new Set(
   readFileSync(envExample, 'utf8')
@@ -102,13 +76,17 @@ const documented = new Set(
 );
 
 const missing = [];
-const undefaulted = [];
+const unguarded = [];
 
-for (const [name, { defaulted, required }] of references) {
+for (const variable of variables) {
+  const name = variable.Name;
+  const required = variable.Required === true;
+  // AlternateValue is the `:+` form: unset deliberately means empty. DefaultValue
+  // non-empty means `:-`/`-` supplied a fallback.
+  const hasFallback = Boolean(variable.DefaultValue) || Boolean(variable.AlternateValue);
+
   if (!documented.has(name)) missing.push({ name, required });
-  // A `${VAR:?}` reference is deliberately mandatory — not having a fallback is the
-  // point, so it is not reported as undefaulted.
-  if (!defaulted && !required) undefaulted.push(name);
+  if (!hasFallback && !required) unguarded.push(name);
 }
 
 let failed = false;
@@ -127,26 +105,17 @@ if (missing.length) {
   );
 }
 
-if (undefaulted.length) {
+if (unguarded.length) {
   failed = true;
   console.error(
-    `\nCompose references with neither a default nor a :? guard: ${undefaulted.join(', ')}\n` +
+    `\nCompose references with neither a default nor a :? guard: ${unguarded.join(', ')}\n` +
       'Use ${VAR:-sensible-default} so `pnpm infra:up` works before anyone writes a .env,\n' +
       'or ${VAR:?why it is required} to fail loudly instead of silently substituting "".',
   );
 }
 
-// An env_file would feed variables this check cannot see, making it quietly vacuous
-// while still printing a green line. Fail rather than mislead.
-if (envFiles.length) {
-  failed = true;
-  console.error(
-    `\ninfra/docker-compose.yml uses env_file (at: ${envFiles.join(', ')}).\n` +
-      'This check only sees inline interpolation, so it would report green while\n' +
-      'blind to everything that file supplies. Extend this script before adding one.',
-  );
-}
-
 if (failed) process.exit(1);
 
-console.log(`check-env-example: ${references.size} compose variable(s) documented in .env.example`);
+console.log(
+  `check-env-example: ${variables.length} compose variable(s) documented in .env.example (via compose's own parser)`,
+);
