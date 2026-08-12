@@ -7,12 +7,16 @@
 
 ```ts
 // packages/contracts/src/catalog.ts
+import { nonNegativeMoneySchema } from './money';
+
 export const productSummarySchema = z.object({
   id: z.uuid(),
   slug: z.string(),
   name: z.string(),
-  priceMinor: z.int().nonnegative(), // integer minor units — never a float (I1)
-  currency: z.string().length(3),
+  // Reuse the shared primitive — do NOT redeclare the amount/currency pair inline.
+  // Declaring it again is how field names drift (`priceMinor` here, `amountMinor`
+  // there) and how the ISO-4217 validation gets silently dropped.
+  price: nonNegativeMoneySchema,
 });
 
 export type ProductSummary = z.infer<typeof productSummarySchema>;
