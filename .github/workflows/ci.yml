@@ -63,6 +63,14 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile $PNPM_FLAGS
 
+      # Must run in CI, not only inside `pnpm verify`. A workspace package with no
+      # lint/typecheck/test script is skipped silently by Turbo — "Running lint in 4
+      # packages" then "1 successful, 1 total" is not an error. That is how this gate
+      # was vacuous before F1, and without this step the hole is still open at the
+      # only place enforcement is machine-checked rather than self-reported.
+      - name: Workspace packages declare their gate scripts
+        run: pnpm check:workspace
+
       - name: Format
         run: pnpm format:check
 
