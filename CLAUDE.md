@@ -27,9 +27,13 @@ the system fits together. Amend the spec in the same PR whenever reality diverge
 pnpm verify
 ```
 
-Runs format:check → lint → typecheck → test → build. Every step must be green before a PR is opened
-and again before it merges. Individual steps: `pnpm lint`, `pnpm typecheck`, `pnpm test`,
-`pnpm build`, `pnpm test:e2e`.
+Runs check:repo → format:check → lint → typecheck → test → build. Every step must be green before a
+PR is opened and again before it merges. Individual steps: `pnpm check:repo`, `pnpm lint`,
+`pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm test:e2e`.
+
+`check:repo` is the cheap structural pass: every workspace package declares its gate scripts (a
+package with none is skipped silently by Turbo), and every variable the compose stack reads is
+documented in `.env.example`.
 
 ## Environment gotchas
 

@@ -18,8 +18,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:workspace": "node scripts/check-workspace-scripts.mjs",
-    "verify": "pnpm run check:workspace && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
-    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "check:env": "node scripts/check-env-example.mjs",
+    "check:infra": "node scripts/check-infra-config.mjs",
+    "check:ports": "node scripts/check-ports.mjs",
+    "check:parser": "node scripts/lib/compose.spec.mjs",
+    "check:repo": "pnpm run check:parser && pnpm run check:workspace && pnpm run check:env && pnpm run check:infra",
+    "verify": "pnpm run check:repo && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
+    "infra:up": "pnpm run check:ports && docker compose -f infra/docker-compose.yml up -d --wait",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "infra:reset": "docker compose -f infra/docker-compose.yml down -v",
     "db:migrate": "pnpm --filter @repo/api run db:migrate",
@@ -29,6 +34,7 @@
   "devDependencies": {
     "@repo/config": "workspace:*",
     "eslint": "9.39.5",
+    "js-yaml": "5.2.3",
     "prettier": "3.9.6",
     "turbo": "2.10.9",
     "typescript": "5.9.3"

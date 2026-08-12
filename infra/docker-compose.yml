@@ -41,7 +41,7 @@ services:
   # Mailpit rather than MailHog — MailHog is unmaintained; Mailpit is its actively
   # developed successor with the same catch-all-SMTP + web-UI model.
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.30.7
     container_name: ae-mailpit
     restart: unless-stopped
     environment:
@@ -53,7 +53,7 @@ services:
       - "${MAILPIT_UI_PORT:-8026}:8025"
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: ae-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
