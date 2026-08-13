@@ -19,7 +19,10 @@ jobs:
   gate:
     name: Verify gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # F6/AC5: "the pipeline is under 10 minutes". This is the enforcement — a drift
+    # past the budget fails the build rather than quietly becoming the new normal.
+    # Baseline at the time of writing: ~107s.
+    timeout-minutes: 10
 
     services:
       postgres:
@@ -60,6 +63,23 @@ jobs:
           node-version: 20.20.0
           cache: pnpm
 
+      # F6/AC5. Turbo's local cache lives in .turbo and is per-checkout, so without
+      # this every run recomputed every task from scratch — the "cache is restored
+      # between runs" half of the criterion was simply not implemented.
+      #
+      # Keyed on the commit so a re-run of the same SHA is an exact hit; restore-keys
+      # fall back to any earlier cache on this branch, then main, so a normal PR push
+      # reuses whatever is still valid. Turbo decides validity by content hash, so a
+      # stale restore cannot produce a wrong result — only a miss.
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ github.ref_name }}-
+            turbo-${{ runner.os }}-
+
       - name: Install
         run: pnpm install --frozen-lockfile $PNPM_FLAGS
 
@@ -85,6 +105,17 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # F6/AC5's second half. The job's timeout-minutes is the enforcement — this step
+      # only surfaces the number so a slow drift is visible in the log before it starts
+      # failing builds.
+      - name: Report gate duration
+        if: always()
+        run: |
+          echo "Gate finished. Job timeout is 10 minutes (F6/AC5)."
+          echo "Turbo summary for the cacheable tasks:"
+          pnpm turbo run build typecheck lint --dry=json 2>/dev/null \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);const t=j.tasks??[];const hits=t.filter(x=>x.cache?.status==="HIT").length;console.log(`  ${hits}/${t.length} cacheable tasks would hit the restored cache`)}catch{console.log("  (summary unavailable)")}})'
 
   migrations-replay:
     name: Migrations replay from empty
@@ -119,23 +150,29 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile $PNPM_FLAGS
 
-      # Skips cleanly until apps/api exists (E0/F3). Once it does, this is invariant I7.
-      - name: Migrate from empty
-        run: |
-          if [ -f apps/api/prisma/schema.prisma ]; then
-            pnpm db:migrate
-          else
-            echo "apps/api not scaffolded yet — nothing to replay"
-          fi
+      # F6/AC3 names `db:reset` specifically, and this job used to run `db:migrate`
+      # instead — so the command the criterion is about, the one that drops and replays
+      # everything, was never exercised in CI. `db:reset` also carries the loopback
+      # guard and the consent env var, so running it here proves that path works
+      # unattended, not just on a developer machine.
+      #
+      # No `if [ -f ... ]` guard any more: apps/api exists, and a conditional that
+      # silently passes when the schema is missing is exactly how this job would go
+      # quietly vacuous if someone moved it.
+      - name: Reset and replay from empty (I7)
+        run: pnpm db:reset
 
-      - name: Seed is idempotent
+      # I8: db:reset already seeds once, so this is the second and third runs. Any
+      # non-zero exit means the seed is no longer create-if-missing.
+      - name: Seed is idempotent (I8)
         run: |
-          if [ -f apps/api/prisma/seed.ts ]; then
-            pnpm db:seed
-            pnpm db:seed
-          else
-            echo "no seed yet"
-          fi
+          pnpm db:seed
+          pnpm db:seed
+
+      # The counts F3/AC4 actually promises, asserted rather than trusted: a replay
+      # that produced an empty catalogue would otherwise pass this job green.
+      - name: Replayed database is genuinely populated
+        run: pnpm --filter @repo/api run db:assert-seeded
 
   harness:
     name: Harness guarantees

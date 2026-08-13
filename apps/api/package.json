@@ -15,7 +15,8 @@
     "db:migrate": "prisma migrate deploy && prisma generate",
     "db:migrate:dev": "prisma migrate dev && prisma generate",
     "db:seed": "prisma generate && prisma db seed",
-    "db:reset": "node scripts/db-reset.mjs"
+    "db:reset": "node scripts/db-reset.mjs",
+    "db:assert-seeded": "prisma generate && tsx scripts/assert-seeded.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.1.29",
