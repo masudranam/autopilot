@@ -7,7 +7,7 @@
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
-    "lint": "prisma generate && eslint src prisma",
+    "lint": "prisma generate && eslint src prisma scripts",
     "test": "prisma migrate deploy && prisma generate && prisma db seed && jest",
     "dev": "prisma generate && tsc-watch -p tsconfig.build.json --onSuccess \"node dist/src/main.js\"",
     "start": "node dist/src/main.js",

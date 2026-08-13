@@ -6,6 +6,14 @@
     "incremental": false,
     "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts", "prisma/**/*.ts", "generated/**/*.ts", "prisma.config.ts"],
+  // scripts/ included because assert-seeded.ts is CI-critical and tsx does no
+  // typechecking — a deliberate type error in it passed both typecheck and lint.
+  "include": [
+    "src/**/*.ts",
+    "prisma/**/*.ts",
+    "scripts/**/*.ts",
+    "generated/**/*.ts",
+    "prisma.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

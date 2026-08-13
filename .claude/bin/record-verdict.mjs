@@ -54,6 +54,40 @@ if (branch === 'main' || branch === 'master') {
   process.exit(1);
 }
 
+/**
+ * Refuse to record a verdict on a dirty working tree.
+ *
+ * Reviewers mutate files to prove a test can fail and restore them afterwards. One
+ * killed mid-run by an API error leaves the mutation behind — during F5 a reviewer died
+ * having replaced the production 500's `title` with the raw exception message, and
+ * committing that would have shipped the exact information-disclosure bug it was
+ * testing for. By the time a verdict is recorded the tree SHOULD be clean: verify has
+ * run, the branch is pushed, and dist/generated/.turbo are all gitignored. So this is
+ * the one point where "dirty" is unambiguously wrong, which makes it enforceable rather
+ * than advice a busy agent skips.
+ */
+let dirty = '';
+try {
+  dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim();
+} catch {
+  /* handled by the rev-parse failure above */
+}
+
+if (dirty) {
+  console.error(
+    `record-verdict: refusing to record a verdict on a dirty working tree.\n\n${dirty
+      .split('\n')
+      .slice(0, 10)
+      .map((line) => `  ${line}`)
+      .join('\n')}\n\n` +
+      `A review agent that died mid-run leaves its mutation behind. Read the diff before\n` +
+      `doing anything else — do not stage it, and do not assume it is yours. If these\n` +
+      `changes are genuinely intended, commit and push them, then re-run the reviewer:\n` +
+      `the verdict must describe the code that will actually merge.`,
+  );
+  process.exit(1);
+}
+
 const file = join(projectDir, '.claude', 'state', `review-${pr}.json`);
 mkdirSync(dirname(file), { recursive: true });
 
