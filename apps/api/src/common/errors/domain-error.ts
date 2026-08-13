@@ -95,3 +95,21 @@ export class RateLimitedError extends DomainError {
   readonly type = ProblemType.RATE_LIMITED;
   readonly title = 'Too many requests';
 }
+
+/**
+ * A dependency the request needs is unreachable — readiness uses this.
+ *
+ * Exists so the health controller can throw rather than hand-build a Problem Details
+ * body: pr-reviewer showed the hand-built version shipping a hardcoded
+ * `instance: '/health/ready'` that did not match the actual request path, which is
+ * exactly the drift one filter owning the format is meant to prevent (I3).
+ */
+export class NotReadyError extends DomainError {
+  readonly status = 503;
+  readonly type = ProblemType.INTERNAL;
+  readonly title = 'Not ready';
+
+  constructor(unreachable: string[]) {
+    super(`Unreachable: ${unreachable.join(', ')}`);
+  }
+}

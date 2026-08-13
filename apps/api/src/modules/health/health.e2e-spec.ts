@@ -23,7 +23,7 @@ describe('health endpoints (F4)', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ bodyParser: false });
     configureApp(app, validateEnv({}));
     await app.init();
   });
@@ -68,7 +68,7 @@ describe('readiness failure path (AC3 — 503 with Problem Details)', () => {
       // readiness must report it rather than hang (bounded probe).
       .useValue(validateEnv({ REDIS_URL: 'redis://127.0.0.1:1' }))
       .compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ bodyParser: false });
     configureApp(app, validateEnv({}));
     await app.init();
   });

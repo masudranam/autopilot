@@ -70,6 +70,19 @@ Offset from defaults because 5432, 5433 and 4200 are already occupied on the dev
 | Mailpit SMTP / UI   | 1026 / 8026 |
 | MinIO API / console | 9010 / 9011 |
 
+### Environment variables the API reads
+
+Every variable is declared in the Zod schema at `apps/api/src/config/env.ts` and nowhere else.
+
+| Variable       | Default (non-production) | Notes                                                                |
+| -------------- | ------------------------ | -------------------------------------------------------------------- |
+| `NODE_ENV`     | `development`            | Absent or unrecognised means internal error detail is **suppressed** |
+| `API_PORT`     | `3001`                   |                                                                      |
+| `API_PREFIX`   | `api/v1`                 |                                                                      |
+| `DATABASE_URL` | compose stack            | **Required explicitly** when `NODE_ENV=production`                   |
+| `REDIS_URL`    | compose stack            | **Required explicitly** when `NODE_ENV=production`                   |
+| `LOG_LEVEL`    | unset                    | Un-silences structured logs under `NODE_ENV=test`                    |
+
 ---
 
 ## 4 · Repository layout

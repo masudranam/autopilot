@@ -47,7 +47,7 @@ async function buildApp(nodeEnv: 'development' | 'production'): Promise<INestApp
     imports: [AppModule],
     controllers: [BoomController],
   }).compile();
-  const app = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication({ bodyParser: false });
   configureApp(app, validateEnv({ NODE_ENV: nodeEnv, ...productionUrls(nodeEnv) }));
   await app.init();
 
@@ -161,6 +161,86 @@ describe('error handling in development', () => {
   it('shows the underlying message in development (AC2, negative control)', async () => {
     const response = await request(app.getHttpServer()).get('/api/v1/boom/leaky').expect(500);
     expect(problemDetailsSchema.parse(response.body).detail).toContain('select');
+  });
+});
+
+/**
+ * Failures raised BEFORE the router — body parsing, param decoding — were escaping
+ * tracing entirely: no X-Trace-Id, no access-log line, and a body traceId that matched
+ * nothing in the logs. Nest registers its parsers during create(), ahead of anything
+ * AppModule.configure() applies, so the trace handler is now registered with app.use()
+ * before them (found by pr-reviewer with wire evidence).
+ */
+describe('pre-router failures are traced too (AC3, AC4)', () => {
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    app = await buildApp('development');
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  async function expectTraced(send: () => request.Test, expectedStatus: number) {
+    const previous = process.env.LOG_LEVEL;
+    process.env.LOG_LEVEL = 'debug';
+    const lines: Record<string, unknown>[] = [];
+    const stdout = jest.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      lines.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      return true;
+    });
+
+    let response;
+    try {
+      response = await send().expect(expectedStatus);
+    } finally {
+      stdout.mockRestore();
+      if (previous === undefined) delete process.env.LOG_LEVEL;
+      else process.env.LOG_LEVEL = previous;
+    }
+
+    const problem = problemDetailsSchema.parse(response.body);
+
+    // All three must agree: header, body, and the access log line.
+    expect(response.headers['x-trace-id']).toBe(problem.traceId);
+    const access = lines.find((line) => line.message === 'request');
+    expect(access).toBeDefined();
+    expect(access?.traceId).toBe(problem.traceId);
+    expect(access?.status).toBe(expectedStatus);
+
+    return problem;
+  }
+
+  it('traces a malformed JSON body (400)', async () => {
+    const problem = await expectTraced(
+      () =>
+        request(app.getHttpServer())
+          .post('/api/v1/health')
+          .set('Content-Type', 'application/json')
+          .send('{"a": }'),
+      400,
+    );
+    expect(problem.instance).toBe('/api/v1/health');
+  });
+
+  it('traces an oversized payload and calls it 413, not 500', async () => {
+    await expectTraced(
+      () =>
+        request(app.getHttpServer())
+          .post('/api/v1/health')
+          .set('Content-Type', 'application/json')
+          .send(JSON.stringify({ blob: 'x'.repeat(2 * 1024 * 1024) })),
+      413,
+    );
+  });
+
+  it('traces an unmatched route (404)', async () => {
+    await expectTraced(() => request(app.getHttpServer()).get('/api/v1/no-such-thing'), 404);
+  });
+
+  it('traces a thrown domain error (404)', async () => {
+    await expectTraced(() => request(app.getHttpServer()).get('/api/v1/boom/domain'), 404);
   });
 });
 

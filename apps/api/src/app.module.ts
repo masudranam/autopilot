@@ -1,17 +1,16 @@
-import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { EnvModule } from './config/env.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { HealthModule } from './modules/health/health.module';
-import { TraceMiddleware } from './common/trace/trace.middleware';
 
+/**
+ * Tracing is deliberately NOT applied here. Nest registers its body parsers during
+ * `NestFactory.create`, ahead of anything `configure()` applies, so a middleware class
+ * cannot wrap a body-parse failure. `configureApp` registers the trace handler with
+ * `app.use()` before the parsers instead — see app.setup.ts.
+ */
 @Module({
   imports: [EnvModule, PrismaModule, RedisModule, HealthModule],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void {
-    // Every route, including ones that 404 — a request that never reaches a
-    // controller still needs a trace id and an access log line (AC3, AC4).
-    consumer.apply(TraceMiddleware).forRoutes('*splat');
-  }
-}
+export class AppModule {}

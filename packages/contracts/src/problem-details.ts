@@ -42,6 +42,8 @@ export const ProblemType = {
   FORBIDDEN: `${PROBLEM_TYPE_BASE}/forbidden`,
   NOT_FOUND: `${PROBLEM_TYPE_BASE}/not-found`,
   CONFLICT: `${PROBLEM_TYPE_BASE}/conflict`,
+  PAYLOAD_TOO_LARGE: `${PROBLEM_TYPE_BASE}/payload-too-large`,
+  UNSUPPORTED_MEDIA_TYPE: `${PROBLEM_TYPE_BASE}/unsupported-media-type`,
   INSUFFICIENT_STOCK: `${PROBLEM_TYPE_BASE}/insufficient-stock`,
   IDEMPOTENCY_KEY_REUSED: `${PROBLEM_TYPE_BASE}/idempotency-key-reused`,
   ILLEGAL_STATE_TRANSITION: `${PROBLEM_TYPE_BASE}/illegal-state-transition`,

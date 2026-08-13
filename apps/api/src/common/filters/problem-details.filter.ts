@@ -87,7 +87,29 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         type: problemTypeForStatus(status),
         title: titleForStatus(status),
         status,
-        detail: httpExceptionDetail(exception),
+        // Suppression is keyed on STATUS, not on exception class. Keying it on class
+        // let `new InternalServerErrorException(err.message)` — the most common way a
+        // 500 is raised in Nest — return SQL and connection strings verbatim in
+        // production while a plain Error was suppressed (found by pr-reviewer).
+        detail: this.detailFor(status, httpExceptionDetail(exception)),
+        instance,
+        traceId,
+      };
+    }
+
+    // body-parser and other express-layer errors carry their own status (413 for an
+    // oversized payload, 400 for a bad content type). Honouring it stops an ordinary
+    // client mistake becoming a 500 logged at error level with a stack.
+    const carried = carriedStatus(exception);
+    if (carried) {
+      return {
+        type: problemTypeForStatus(carried),
+        title: titleForStatus(carried),
+        status: carried,
+        detail: this.detailFor(
+          carried,
+          exception instanceof Error ? exception.message : 'Request rejected.',
+        ),
         instance,
         traceId,
       };
@@ -97,14 +119,26 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       type: ProblemType.INTERNAL,
       title: 'Internal server error',
       status: 500,
-      // AC2: an unexpected error's message routinely carries SQL, paths or
-      // credentials. Production says nothing; the logs have everything.
-      detail: this.isProduction
-        ? 'An unexpected error occurred. Quote the traceId when reporting it.'
-        : `${exception instanceof Error ? exception.message : String(exception)}`,
+      detail: this.detailFor(
+        500,
+        exception instanceof Error ? exception.message : String(exception),
+      ),
       instance,
       traceId,
     };
+  }
+
+  /**
+   * AC2: a 5xx message routinely carries SQL, file paths or credentials, whatever
+   * threw it. In production the client gets a generic sentence and the real detail
+   * goes to the logs, correlated by traceId. Client errors (4xx) describe the
+   * caller's own mistake, so they stay informative.
+   */
+  private detailFor(status: number, message: string): string {
+    if (status >= 500 && this.isProduction) {
+      return 'An unexpected error occurred. Quote the traceId when reporting it.';
+    }
+    return message;
   }
 }
 
@@ -114,6 +148,19 @@ export function zodToFieldErrors(error: ZodError): FieldError[] {
     path: issue.path.map((segment) => String(segment)).join('.') || '(root)',
     message: issue.message,
   }));
+}
+
+/**
+ * A `status`/`statusCode` carried by a non-HttpException error — express-layer errors
+ * such as body-parser's PayloadTooLargeError (413) use this convention.
+ */
+function carriedStatus(exception: unknown): number | undefined {
+  if (!exception || typeof exception !== 'object') return undefined;
+  const candidate = exception as { status?: unknown; statusCode?: unknown };
+  const value = typeof candidate.status === 'number' ? candidate.status : candidate.statusCode;
+  if (typeof value !== 'number') return undefined;
+  // Only trust a plausible client/server status; anything else is coincidence.
+  return value >= 400 && value <= 599 ? value : undefined;
 }
 
 function httpExceptionDetail(exception: HttpException): string {
@@ -133,6 +180,10 @@ const STATUS_TYPES: Readonly<Record<number, string>> = {
   403: ProblemType.FORBIDDEN,
   404: ProblemType.NOT_FOUND,
   409: ProblemType.CONFLICT,
+  // A client's oversized upload or wrong content type is their mistake, not ours —
+  // typing it INTERNAL would have clients switching on the wrong problem type.
+  413: ProblemType.PAYLOAD_TOO_LARGE,
+  415: ProblemType.UNSUPPORTED_MEDIA_TYPE,
   422: ProblemType.VALIDATION_FAILED,
   429: ProblemType.RATE_LIMITED,
 };
@@ -148,6 +199,7 @@ const STATUS_TITLES: Readonly<Record<number, string>> = {
   404: 'Not found',
   405: 'Method not allowed',
   409: 'Conflict',
+  413: 'Payload too large',
   415: 'Unsupported media type',
   422: 'Validation failed',
   429: 'Too many requests',
