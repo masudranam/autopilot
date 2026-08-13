@@ -13,6 +13,12 @@ export class RedisService implements OnModuleDestroy {
       lazyConnect: true,
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
+      // Do not reconnect forever behind an unreachable host — a readiness probe
+      // against a down Redis should fail fast, not queue retries. (This was tried as
+      // a fix for the jest worker warning in #67 and is NOT one: pr-reviewer showed
+      // the warning reproduces on main and isolated it to health.e2e-spec.ts, and
+      // that an ioredis client with these options tears down cleanly.)
+      retryStrategy: () => null,
     });
     // ioredis emits 'error' on every failed reconnect; without a listener each one
     // becomes an unhandled-error crash. Readiness surfaces the state instead.

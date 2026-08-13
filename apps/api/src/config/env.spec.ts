@@ -61,3 +61,45 @@ describe('production refuses to inherit development defaults (#65)', () => {
     expect(validateEnv({ NODE_ENV: 'test' }).REDIS_URL).toContain('localhost:6389');
   });
 });
+
+/**
+ * The trigger for AC2's suppression, which had no test at all: pr-reviewer reverted
+ * the derivation to `explicit === 'production'` — the exact fail-open form
+ * security-auditor originally reported — and the whole suite stayed green at 139/139.
+ * Only the NODE_ENV-unset case changes under that mutation, and nothing looked at it.
+ */
+describe('suppressInternalErrors fails closed (AC2 trigger)', () => {
+  it.each([
+    ['unset', {}, true],
+    [
+      'production',
+      {
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://u:p@h:5432/d',
+        REDIS_URL: 'redis://h:6379',
+      },
+      true,
+    ],
+    ['development', { NODE_ENV: 'development' }, false],
+    ['test', { NODE_ENV: 'test' }, false],
+  ])('%s → suppress=%s', (_label, source, expected) => {
+    expect(validateEnv(source).suppressInternalErrors).toBe(expected);
+  });
+
+  // An empty string is not one of the three valid values, so it does not reach the
+  // derivation at all — the app refuses to boot. Also fail-closed, by a different route.
+  it.each([[''], ['staging'], ['PRODUCTION']])(
+    'refuses to boot on NODE_ENV=%o rather than guessing',
+    (value) => {
+      expect(() => validateEnv({ NODE_ENV: value })).toThrow(/NODE_ENV/);
+    },
+  );
+
+  // The specific regression: absence must NOT be treated as development. An
+  // unconfigured deploy has to suppress, not narrate its internals to clients.
+  it('an unset NODE_ENV suppresses, because an unconfigured deploy is not a dev box', () => {
+    expect(validateEnv({}).suppressInternalErrors).toBe(true);
+    // …while still keeping the zero-setup connection defaults, so a fresh clone runs.
+    expect(validateEnv({}).DATABASE_URL).toContain('localhost:5442');
+  });
+});

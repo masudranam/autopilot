@@ -26,6 +26,13 @@ export const envSchema = z
         'postgresql://ecommerce:ecommerce_dev_password@localhost:5442/ecommerce?schema=public',
       ),
     REDIS_URL: z.url().default('redis://localhost:6389'),
+    /**
+     * Un-silences structured logs under NODE_ENV=test, where they are off by default
+     * so request logging does not bury a CI assertion failure. Declared here because
+     * every variable this app reads belongs in this schema — pr-reviewer caught it
+     * being read with a bare process.env, contradicting this file's own header.
+     */
+    LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
@@ -42,7 +49,19 @@ export const envSchema = z
     }
   });
 
-export type Env = z.infer<typeof envSchema>;
+export type Env = z.infer<typeof envSchema> & {
+  /**
+   * Whether to suppress internal error detail on the wire.
+   *
+   * Derived from whether NODE_ENV was EXPLICITLY development or test — not from the
+   * parsed value, which defaults to 'development'. security-auditor showed the
+   * `=== 'production'` form failing open: with NODE_ENV unset the server booted
+   * verbose, returning raw internal messages to clients. Absent or unrecognised now
+   * means suppressed. The connection-string defaults still apply, so a fresh clone
+   * runs with zero setup — it is only disclosure that fails closed.
+   */
+  readonly suppressInternalErrors: boolean;
+};
 
 /**
  * The raw env being validated, visible to the superRefine above. Zod refinements see
@@ -63,7 +82,12 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): Env {
         `Environment validation failed — fix these variables before the API can start:\n${details}`,
       );
     }
-    return result.data;
+
+    const explicit = source.NODE_ENV;
+    return {
+      ...result.data,
+      suppressInternalErrors: explicit !== 'development' && explicit !== 'test',
+    };
   } finally {
     rawSourceBeingValidated = undefined;
   }

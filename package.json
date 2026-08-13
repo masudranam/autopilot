@@ -38,5 +38,10 @@
     "prettier": "3.9.6",
     "turbo": "2.10.9",
     "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "js-yaml@>=5.0.0 <=5.2.1": ">=5.2.2"
+    }
   }
 }
