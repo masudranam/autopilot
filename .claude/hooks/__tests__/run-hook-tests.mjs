@@ -10,7 +10,7 @@
  *   node .claude/hooks/__tests__/run-hook-tests.mjs
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -267,6 +267,69 @@ if (head) {
 }
 
 rmSync(statePath('review-42.json'), { force: true });
+
+// ============================================================ record-verdict
+
+/**
+ * The dirty-tree refusal is the only enforcement added by F6 with nothing behind it —
+ * a future edit could delete it silently (pr-reviewer). It exists because a reviewer
+ * killed mid-mutation during F5 left an information-disclosure bug in the tree, and
+ * verdict-recording time is the one moment "dirty" is unambiguously wrong.
+ */
+function runRecordVerdict(args) {
+  const result = spawnSync(
+    process.execPath,
+    [join(projectDir, '.claude', 'bin', 'record-verdict.mjs'), ...args],
+    {
+      encoding: 'utf8',
+      cwd: projectDir,
+      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
+      timeout: 20_000,
+    },
+  );
+  return { code: result.status, stderr: result.stderr ?? '', stdout: result.stdout ?? '' };
+}
+
+const treeIsDirty =
+  spawnSync('git', ['status', '--porcelain'], {
+    cwd: projectDir,
+    encoding: 'utf8',
+  }).stdout?.trim() !== '';
+
+{
+  const name = 'record-verdict refuses a dirty tree';
+  const probePr = '999998';
+  rmSync(statePath(`review-${probePr}.json`), { force: true });
+
+  const { code, stderr } = runRecordVerdict([
+    '--pr',
+    probePr,
+    '--verdict',
+    'PASS',
+    '--summary',
+    'probe',
+  ]);
+  const wroteState = existsSync(statePath(`review-${probePr}.json`));
+
+  if (treeIsDirty) {
+    // Refuse, and refuse BEFORE writing — a verdict written then complained about
+    // would still open the merge gate.
+    if (code === 1 && /dirty working tree/.test(stderr) && !wroteState) passed += 1;
+    else
+      failures.push(
+        `${name}\n    wanted exit 1 with no state file, got exit ${code}, state written: ${wroteState}\n    stderr: ${stderr.trim().slice(0, 160)}`,
+      );
+  } else {
+    // On a clean tree it must succeed — otherwise the check is a permanent blocker.
+    if (code === 0 && wroteState) passed += 1;
+    else
+      failures.push(
+        `${name} (clean-tree case)\n    wanted exit 0 with a state file, got exit ${code}, state written: ${wroteState}\n    stderr: ${stderr.trim().slice(0, 160)}`,
+      );
+  }
+
+  rmSync(statePath(`review-${probePr}.json`), { force: true });
+}
 
 // ============================================================ report
 

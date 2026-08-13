@@ -28,10 +28,57 @@ const BUDGET_MINUTES = 10;
 const problems = [];
 const jobs = workflow.jobs ?? {};
 
+/**
+ * The `run:` bodies of a job's steps — deliberately NOT including `step.name`.
+ *
+ * Concatenating the label meant a step *named* "pnpm test" whose run was
+ * `echo skipping` satisfied every command assertion below: the check validated labels,
+ * not commands (pr-reviewer).
+ */
 function stepsOf(jobName) {
-  return (jobs[jobName]?.steps ?? [])
-    .map((step) => `${step.name ?? step.uses ?? ''} ${step.run ?? ''}`)
-    .join('\n');
+  return (jobs[jobName]?.steps ?? []).map((step) => step.run ?? '').join('\n');
+}
+
+/**
+ * Ways to neutralise a job or step without removing anything the string assertions see.
+ *
+ * The important one is a job-level `if:` — a SKIPPED job still *satisfies* a required
+ * status check, so `if: false` on migrations-replay would delete AC3 from the pipeline
+ * while branch protection stayed perfectly content.
+ */
+function assertNotNeutralised(jobName) {
+  const job = jobs[jobName];
+  if (!job) {
+    problems.push(`job "${jobName}" is missing entirely`);
+    return;
+  }
+
+  if (job.if !== undefined) {
+    problems.push(
+      `job "${jobName}" has a job-level "if:" — a skipped job still satisfies a required status check, ` +
+        `so this silently removes a criterion from the pipeline`,
+    );
+  }
+  if (job['continue-on-error']) {
+    problems.push(`job "${jobName}" sets continue-on-error — it can fail and still report green`);
+  }
+
+  for (const step of job.steps ?? []) {
+    const label = step.name ?? step.uses ?? '(unnamed)';
+    if (step['continue-on-error']) {
+      problems.push(
+        `step "${label}" in "${jobName}" sets continue-on-error — it can fail silently`,
+      );
+    }
+    if (step.if !== undefined) {
+      problems.push(`step "${label}" in "${jobName}" has an "if:" — a skipped step checks nothing`);
+    }
+  }
+}
+
+// ---- no job or step is neutralised while still looking present ----
+for (const name of ['gate', 'migrations-replay', 'harness']) {
+  assertNotNeutralised(name);
 }
 
 // ---- every job is bounded by the same budget (AC5) ----
@@ -94,10 +141,19 @@ if (!harnessSteps.includes('only|skip')) {
 }
 
 // ---- the cache cannot make the gate vacuous (AC5) ----
-const turbo = JSON.parse(
-  readFileSync(join(repoRoot, 'turbo.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
-);
-for (const required of ['.github/workflows/**', 'infra/**']) {
+// turbo.json is kept as PURE JSON. It was briefly JSONC (which Turbo and Prettier both
+// accept), and the line-anchored comment-stripping workaround that used to live here
+// crashed check:repo with a raw SyntaxError on an ordinary TRAILING comment — the
+// invariants gate failing on a comment style the file's own format invited
+// (pr-reviewer). The rationale that was in those comments is here instead.
+const turbo = JSON.parse(readFileSync(join(repoRoot, 'turbo.json'), 'utf8'));
+
+// `.github/workflows/**` and `infra/**` belong to no package, so without them a PR
+// touching only CI or infra produced identical task hashes and every cacheable task
+// replayed from cache: `pnpm test` reporting 158 tests passed having run none, with no
+// Postgres touched. A Postgres major-version bump would never have been tested.
+// `turbo.json` itself is included so changing the cache config cannot be cached.
+for (const required of ['.github/workflows/**', 'infra/**', 'turbo.json']) {
   if (!(turbo.globalDependencies ?? []).includes(required)) {
     problems.push(
       `turbo.json globalDependencies is missing "${required}". Without it a PR touching only ` +
