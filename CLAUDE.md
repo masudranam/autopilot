@@ -49,6 +49,12 @@ These cost real time when forgotten:
 - **TypeScript stays on 5.9.3.** TS 7 breaks `typescript-eslint` and `ts-jest`
   ([ADR-0007](docs/adr/0007-typescript-5-not-7.md)). Do not "helpfully" upgrade it.
 - **ESLint stays on 9.x.** `eslint-plugin-jsx-a11y` does not support ESLint 10.
+- **Never run the Nest app with `tsx`.** esbuild does not emit decorator metadata, so DI silently
+  injects `undefined` — the server boots, routes map, and the first request crashes, while tests
+  stay green because ts-jest uses real tsc. The api `dev` script uses `tsc-watch` for exactly this
+  reason. `tsx` is fine for DI-free scripts (the seed).
+- **`**/*.spec.ts` does not match `*.e2e-spec.ts`.** When adding a test suffix, update jest
+  `testMatch` and `tsconfig.build.json` `exclude` together, or the e2e suite silently never runs.
 
 ## Ports
 
