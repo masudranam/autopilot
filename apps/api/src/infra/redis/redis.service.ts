@@ -13,6 +13,10 @@ export class RedisService implements OnModuleDestroy {
       lazyConnect: true,
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
+      // Do not reconnect forever behind an unreachable host: the retry timer
+      // outlives app.close() and keeps the jest worker alive (#67). Readiness
+      // reconnects lazily on the next probe, so nothing is lost.
+      retryStrategy: () => null,
     });
     // ioredis emits 'error' on every failed reconnect; without a listener each one
     // becomes an unhandled-error crash. Readiness surfaces the state instead.

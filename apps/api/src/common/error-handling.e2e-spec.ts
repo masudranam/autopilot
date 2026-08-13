@@ -5,6 +5,7 @@
  * through the actual middleware, filter and HTTP stack — not a unit harness.
  */
 import 'reflect-metadata';
+import type { Server } from 'node:http';
 import { Controller, Get, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -49,6 +50,16 @@ async function buildApp(nodeEnv: 'development' | 'production'): Promise<INestApp
   const app = moduleRef.createNestApplication();
   configureApp(app, validateEnv({ NODE_ENV: nodeEnv, ...productionUrls(nodeEnv) }));
   await app.init();
+
+  // Bind on an ephemeral port up front so parallel supertest calls never race to
+  // bind it themselves. app.close() tears this down.
+  const server = app.getHttpServer() as Server;
+  if (!server.listening) {
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+  }
+
   return app;
 }
 
@@ -109,10 +120,17 @@ describe('error handling in development', () => {
   });
 
   it('gives concurrent requests distinct trace ids (AC3)', async () => {
+    // The server is bound once in beforeAll. Letting each supertest call bind it
+    // instead made 8 parallel requests race, producing read ECONNRESET on CI while
+    // passing locally.
     const responses = await Promise.all(
-      Array.from({ length: 8 }, () => request(app.getHttpServer()).get('/api/v1/boom/trace')),
+      Array.from({ length: 8 }, () =>
+        request(app.getHttpServer()).get('/api/v1/boom/trace').expect(200),
+      ),
     );
+
     const ids = responses.map((r) => r.body.traceId as string);
+    expect(ids.every((id) => typeof id === 'string' && id.length > 8)).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
   });
 

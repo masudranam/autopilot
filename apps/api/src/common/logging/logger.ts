@@ -13,7 +13,18 @@ type Level = 'debug' | 'info' | 'warn' | 'error';
  */
 export type LogFields = Record<string, unknown>;
 
+/**
+ * Tests capture writes directly; letting every request also print to the runner's
+ * stdout buried a one-line CI assertion failure under thousands of log lines. Set
+ * LOG_LEVEL=debug to see them anyway.
+ */
+function silenced(): boolean {
+  return process.env.NODE_ENV === 'test' && !process.env.LOG_LEVEL;
+}
+
 function emit(level: Level, message: string, fields: LogFields = {}): void {
+  if (silenced()) return;
+
   const line = JSON.stringify({
     level,
     time: new Date().toISOString(),

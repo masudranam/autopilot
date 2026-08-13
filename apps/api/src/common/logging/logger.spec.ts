@@ -1,6 +1,15 @@
 import { logger } from './logger';
 import { runWithTrace } from '../trace/trace';
 
+// The logger is silent under NODE_ENV=test so request logs do not bury CI output.
+// These tests are about the logger itself, so they opt back in.
+beforeAll(() => {
+  process.env.LOG_LEVEL = 'debug';
+});
+afterAll(() => {
+  delete process.env.LOG_LEVEL;
+});
+
 /** Captures whichever stream the logger writes to and returns parsed lines. */
 function captureLines(fn: () => void): Record<string, unknown>[] {
   const lines: string[] = [];
@@ -38,6 +47,19 @@ describe('structured logging (AC4)', () => {
   it('still emits a trace id outside a request', () => {
     const [line] = captureLines(() => logger.info('background job'));
     expect(typeof line?.traceId).toBe('string');
+  });
+
+  it('is silent under NODE_ENV=test unless LOG_LEVEL is set', () => {
+    const previous = process.env.LOG_LEVEL;
+    delete process.env.LOG_LEVEL;
+    const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      logger.info('should not appear');
+      expect(stdout).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+      if (previous !== undefined) process.env.LOG_LEVEL = previous;
+    }
   });
 
   it('sends warn and error to stderr, info to stdout', () => {
