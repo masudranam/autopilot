@@ -26,22 +26,28 @@ const GATE_COMMANDS = [
 ];
 
 /**
- * Shell that neutralises a command while leaving its text present.
+ * A gate step's `run:` body must be EXACTLY one of its allowed commands.
  *
- * `|| true` is the dangerous one: unlike `if: false` it is ordinary shell an agent
- * writes without malice, and it makes any failure green. The echo prefix and an
- * explicit no-match test filter do the same (pr-reviewer found all three).
+ * This replaces a blocklist of neutralising shell shapes, which kept losing: two review
+ * rounds surfaced `|| true`, `|| :`, an echo prefix, `--testPathPatterns=nothing`,
+ * `true &&`, then `|| echo ok`, `|| exit 0`, `set +e`, `--testPathIgnorePatterns=.` and
+ * a step-level `shell:`. Enumerating ways to defang a command is unbounded; requiring
+ * the command to be exactly what it claims is not.
+ *
+ * Exact-match also closes the substring hazard that let `pnpm test:e2e` satisfy the
+ * `pnpm test` assertion while running zero tests — the single most consequential hole
+ * either round found, because it removes the whole suite from CI in one token.
  */
-const NEUTRALISING_SHELL = [
-  { pattern: /\|\|\s*true\b/, why: '"|| true" makes the command always succeed' },
-  { pattern: /\|\|\s*:\s*$/m, why: '"|| :" makes the command always succeed' },
-  { pattern: /^\s*echo\s+.*pnpm/m, why: 'the command is echoed, not run' },
-  {
-    pattern: /--testPathPatterns?=/,
-    why: 'a test path filter can select zero tests and still pass',
-  },
-  { pattern: /\btrue\s*&&/, why: 'the command is short-circuited' },
-];
+function normaliseRun(run) {
+  return String(run ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'))
+    .join('\n');
+}
+
+/** Shells that behave normally. Anything else can neutralise every command it runs. */
+const SAFE_SHELLS = /^(bash|sh|pwsh|powershell|python)$/;
 
 /** Steps identified by `uses:` whose presence is itself an acceptance criterion. */
 const REQUIRED_USES = [
@@ -122,10 +128,11 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
       if (step.if !== undefined) {
         problems.push(`step "${label}" in "${name}" has an "if:" — a skipped step checks nothing`);
       }
-      for (const { pattern, why } of NEUTRALISING_SHELL) {
-        if (step.run && pattern.test(step.run)) {
-          problems.push(`step "${label}" in "${name}" is neutralised: ${why}`);
-        }
+      // A per-step shell is the targeted version of the defaults.run.shell attack.
+      if (step.shell && !SAFE_SHELLS.test(String(step.shell).trim())) {
+        problems.push(
+          `step "${label}" in "${name}" sets a custom shell (${String(step.shell)}) — it can neutralise the command`,
+        );
       }
     }
   }
@@ -144,10 +151,23 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
   }
 
   // ---- the gate runs the whole verify chain (AC1) ----
-  const gateRuns = runsOf('gate');
+  //
+  // EXACT match against a normalised run: body, not `includes`. A substring check let
+  // `pnpm test:e2e` satisfy `pnpm test` — and since no package declares a test:e2e
+  // script, that runs zero tasks and exits 0, silently removing all 158 tests from CI
+  // in a one-token edit (pr-reviewer). `pnpm lint:fix` for `pnpm lint` is the milder
+  // sibling: a real script that auto-fixes instead of failing.
+  const gateRunBodies = new Set((jobs.gate?.steps ?? []).map((step) => normaliseRun(step.run)));
   for (const command of GATE_COMMANDS) {
-    if (!gateRuns.includes(command))
-      problems.push(`the gate job no longer runs "${command}" (F6/AC1)`);
+    if (!gateRunBodies.has(command)) {
+      const nearMiss = [...gateRunBodies].find(
+        (body) => body.includes(command) && body !== command,
+      );
+      problems.push(
+        `the gate job does not run exactly "${command}" (F6/AC1)` +
+          (nearMiss ? ` — closest step is "${nearMiss}", which is not the same command` : ''),
+      );
+    }
   }
 
   // ---- steps identified by uses: are asserted too ----
@@ -157,14 +177,20 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
   }
 
   // ---- the replay job resets rather than migrating (AC3) ----
+  //
+  // Exact-line match: `echo db:assert-seeded` previously satisfied the assertion below,
+  // because the echo guard only looked for the literal "pnpm" on the line.
+  const replayLines = new Set(
+    (jobs['migrations-replay']?.steps ?? []).flatMap((step) => normaliseRun(step.run).split('\n')),
+  );
   const replayRuns = runsOf('migrations-replay');
-  if (!replayRuns.includes('pnpm db:reset')) {
+  if (!replayLines.has('pnpm db:reset')) {
     problems.push(
       'the replay job does not run "pnpm db:reset" (F6/AC3, I7). db:migrate applies migrations to ' +
         'whatever already exists and never proves a replay from empty.',
     );
   }
-  if (!replayRuns.includes('db:assert-seeded')) {
+  if (!replayLines.has('pnpm --filter @repo/api run db:assert-seeded')) {
     problems.push(
       'the replay job does not assert the replayed database is populated — a replay producing an ' +
         'EMPTY catalogue would pass green (F3/AC4).',
@@ -179,7 +205,11 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
 
   // ---- the harness job keeps both guarantees (AC4) ----
   const harnessRuns = runsOf('harness');
-  if (!harnessRuns.includes('run-hook-tests.mjs')) {
+  const harnessLines = new Set(
+    (jobs.harness?.steps ?? []).flatMap((step) => normaliseRun(step.run).split('\n')),
+  );
+  // Exact line, so `echo run-hook-tests.mjs` no longer satisfies it.
+  if (!harnessLines.has('node .claude/hooks/__tests__/run-hook-tests.mjs')) {
     problems.push(
       'the harness job no longer runs the hook test suite — the merge gate is unguarded',
     );

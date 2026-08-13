@@ -94,7 +94,7 @@ attack(
     step.name = 'pnpm test';
     step.run = 'echo skipping';
   },
-  'no longer runs "pnpm test"',
+  'does not run exactly "pnpm test"',
 );
 
 attack(
@@ -102,7 +102,7 @@ attack(
   ({ workflow }) => {
     testStep(workflow).run = 'pnpm test || true';
   },
-  'always succeed',
+  'does not run exactly "pnpm test"',
 );
 
 attack(
@@ -110,7 +110,7 @@ attack(
   ({ workflow }) => {
     testStep(workflow).run = 'echo would run pnpm test';
   },
-  'echoed, not run',
+  'does not run exactly "pnpm test"',
 );
 
 attack(
@@ -118,7 +118,7 @@ attack(
   ({ workflow }) => {
     testStep(workflow).run = 'pnpm test -- --testPathPatterns=zzz-nothing';
   },
-  'zero tests',
+  'does not run exactly "pnpm test"',
 );
 
 attack(
@@ -151,6 +151,91 @@ attack(
     workflow.defaults = { run: { shell: 'bash -c "true" {0}' } };
   },
   'neutralise every run: step',
+);
+
+// The targeted version of the same attack — the per-step `shell:` key was never read.
+attack(
+  'a custom step-level shell',
+  ({ workflow }) => {
+    testStep(workflow).shell = 'bash -c "true" {0}';
+  },
+  'custom shell',
+);
+
+// A step-level `if:` was enforced but had no fixture — the one mutation of fourteen the
+// spec missed, so it could have rotted silently (pr-reviewer).
+attack(
+  'if: false on the Test step',
+  ({ workflow }) => {
+    testStep(workflow).if = false;
+  },
+  'skipped step checks nothing',
+);
+
+/**
+ * The substring hazard, in the assertion that guards the test suite itself.
+ *
+ * `'pnpm test:e2e'.includes('pnpm test')` is true, and since no package declares a
+ * test:e2e script, `turbo run test:e2e` runs zero tasks and exits 0 — so this one-token
+ * edit removed all 158 tests from CI while the checker reported every criterion present.
+ * The most consequential hole either review round found.
+ */
+attack(
+  'pnpm test swapped for pnpm test:e2e (runs zero tasks, exits 0)',
+  ({ workflow }) => {
+    testStep(workflow).run = 'pnpm test:e2e';
+  },
+  'does not run exactly "pnpm test"',
+);
+
+attack(
+  'pnpm lint swapped for pnpm lint:fix (auto-fixes instead of failing)',
+  ({ workflow }) => {
+    stepIn(workflow, 'gate', (step) => step.run === 'pnpm lint').run = 'pnpm lint:fix';
+  },
+  'does not run exactly "pnpm lint"',
+);
+
+// The blocklist of neutralising shell shapes kept losing — these five are the ones two
+// review rounds found after the first three were closed. Exact-match makes the whole
+// class unreachable rather than enumerating it.
+for (const [label, run] of [
+  ['|| echo ok', 'pnpm test || echo ok'],
+  ['|| exit 0', 'pnpm test || exit 0'],
+  ['set +e then exit 0', 'set +e\npnpm test\nexit 0'],
+  ['--testPathIgnorePatterns', 'pnpm test -- --testPathIgnorePatterns=.'],
+  ['|| true', 'pnpm test || true'],
+  ['; exit 0', 'pnpm test; exit 0'],
+  ['echoed', 'echo pnpm test'],
+]) {
+  attack(
+    `Test neutralised with ${label}`,
+    ({ workflow }) => {
+      testStep(workflow).run = run;
+    },
+    'does not run exactly "pnpm test"',
+  );
+}
+
+// The harness and replay assertions were echo-able because the old guard required the
+// literal "pnpm" on the line.
+attack(
+  'the hook suite command echoed rather than run',
+  ({ workflow }) => {
+    stepIn(workflow, 'harness', (step) => String(step.run ?? '').includes('run-hook-tests')).run =
+      'echo node .claude/hooks/__tests__/run-hook-tests.mjs';
+  },
+  'merge gate is unguarded',
+);
+
+attack(
+  'the populate assertion echoed rather than run',
+  ({ workflow }) => {
+    stepIn(workflow, 'migrations-replay', (step) =>
+      String(step.run ?? '').includes('db:assert-seeded'),
+    ).run = 'echo db:assert-seeded';
+  },
+  'EMPTY catalogue',
 );
 
 attack(
@@ -193,7 +278,7 @@ for (const command of [
     ({ workflow }) => {
       workflow.jobs.gate.steps = workflow.jobs.gate.steps.filter((step) => step.run !== command);
     },
-    `no longer runs "${command}"`,
+    `does not run exactly "${command}"`,
   );
 }
 
@@ -283,7 +368,16 @@ attack(
   'contains a comment',
 );
 
-expectClean('a URL containing // inside a string is not mistaken for a comment');
+// This case previously took no mutate argument, making it byte-identical to the
+// baseline: it could not fail for its stated reason, and deleting the string-stripping
+// pass left the spec at 29 passed (pr-reviewer). It now injects a URL with a DOUBLE
+// slash in the path, which is the form that actually false-positives without stripping.
+expectClean('a URL containing // inside a string is not mistaken for a comment', ({ texts }) => {
+  texts.turboText = texts.turboText.replace(
+    '"ui": "stream",',
+    '"ui": "stream",\n  "docsUrl": "https://example.dev//deep/path",',
+  );
+});
 
 // ---------------------------------------------------------------- report
 
