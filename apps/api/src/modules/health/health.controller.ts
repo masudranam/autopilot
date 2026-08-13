@@ -7,7 +7,7 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { ProblemType } from '@repo/contracts';
+import { ProblemType, type ProblemDetails } from '@repo/contracts';
 import { HealthService } from './health.service';
 
 /**
@@ -50,16 +50,17 @@ export class HealthController {
 
     // Minimal RFC 9457 body (I3). The global exception filter with real trace
     // propagation is F5; this endpoint must not depend on it to report accurately.
-    res
-      .status(503)
-      .type('application/problem+json')
-      .json({
-        type: ProblemType.INTERNAL,
-        title: 'Not ready',
-        status: 503,
-        detail: `Unreachable: ${failing.map(([name]) => name).join(', ')}`,
-        instance: '/health/ready',
-        traceId: randomUUID(),
-      });
+    // `satisfies` couples the literal to the contract at compile time, so a drifted
+    // field name here is a type error rather than a wire-format bug.
+    const problem = {
+      type: ProblemType.INTERNAL,
+      title: 'Not ready',
+      status: 503,
+      detail: `Unreachable: ${failing.map(([name]) => name).join(', ')}`,
+      instance: '/health/ready',
+      traceId: randomUUID(),
+    } satisfies ProblemDetails;
+
+    res.status(503).type('application/problem+json').json(problem);
   }
 }

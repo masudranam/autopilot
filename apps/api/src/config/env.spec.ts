@@ -28,3 +28,36 @@ describe('environment validation (F4/AC2)', () => {
     expect(() => validateEnv({ API_PORT: '70000' })).toThrow(/API_PORT/);
   });
 });
+
+describe('production refuses to inherit development defaults (#65)', () => {
+  // security-auditor demonstrated that without this, a production deploy with zero
+  // configuration boots green against localhost with the committed dev password.
+  it('a production env with nothing set fails fast, naming every missing variable', () => {
+    expect(() => validateEnv({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL/);
+    expect(() => validateEnv({ NODE_ENV: 'production' })).toThrow(/REDIS_URL/);
+  });
+
+  it('a production env missing only REDIS_URL names exactly that', () => {
+    const partial = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://u:p@db.internal:5432/shop',
+    };
+    expect(() => validateEnv(partial)).toThrow(/REDIS_URL/);
+    expect(() => validateEnv(partial)).not.toThrow(/DATABASE_URL[^_]/);
+  });
+
+  it('a fully-specified production env passes and keeps the given values', () => {
+    const env = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://u:p@db.internal:5432/shop',
+      REDIS_URL: 'redis://cache.internal:6379',
+    });
+    expect(env.DATABASE_URL).toContain('db.internal');
+    expect(env.REDIS_URL).toContain('cache.internal');
+  });
+
+  it('development and test still get the zero-setup defaults', () => {
+    expect(validateEnv({}).DATABASE_URL).toContain('localhost:5442');
+    expect(validateEnv({ NODE_ENV: 'test' }).REDIS_URL).toContain('localhost:6389');
+  });
+});
