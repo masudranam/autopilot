@@ -290,45 +290,65 @@ function runRecordVerdict(args) {
   return { code: result.status, stderr: result.stderr ?? '', stdout: result.stdout ?? '' };
 }
 
-const treeIsDirty =
-  spawnSync('git', ['status', '--porcelain'], {
-    cwd: projectDir,
-    encoding: 'utf8',
-  }).stdout?.trim() !== '';
-
+/**
+ * Both directions, in one run, by CREATING the dirty state rather than branching on
+ * whatever the tree happens to be.
+ *
+ * The previous version branched on ambient dirtiness, which meant that in CI — where the
+ * tree is always clean after checkout — only the clean-tree assertion ever executed, and
+ * a build with the refusal DELETED satisfied it. pr-reviewer proved that in a detached
+ * worktree: refusal removed, 21/21 green, and a verdict recorded on a dirty tree.
+ * Locally it only looked like it worked because editing the file to break the refusal
+ * happened to dirty the tree — the mutation detecting itself.
+ */
 {
-  const name = 'record-verdict refuses a dirty tree';
   const probePr = '999998';
-  rmSync(statePath(`review-${probePr}.json`), { force: true });
+  const verdictFile = statePath(`review-${probePr}.json`);
+  const dirtyMarker = join(projectDir, 'PROBE-DIRTY-TREE.tmp');
+  const args = ['--pr', probePr, '--verdict', 'PASS', '--summary', 'probe'];
 
-  const { code, stderr } = runRecordVerdict([
-    '--pr',
-    probePr,
-    '--verdict',
-    'PASS',
-    '--summary',
-    'probe',
-  ]);
-  const wroteState = existsSync(statePath(`review-${probePr}.json`));
+  const gitIsClean = () =>
+    spawnSync('git', ['status', '--porcelain'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+    }).stdout?.trim() === '';
 
-  if (treeIsDirty) {
-    // Refuse, and refuse BEFORE writing — a verdict written then complained about
-    // would still open the merge gate.
-    if (code === 1 && /dirty working tree/.test(stderr) && !wroteState) passed += 1;
+  rmSync(verdictFile, { force: true });
+  rmSync(dirtyMarker, { force: true });
+
+  // ---- clean tree: must SUCCEED, or the check is a permanent blocker ----
+  if (gitIsClean()) {
+    const clean = runRecordVerdict(args);
+    if (clean.code === 0 && existsSync(verdictFile)) passed += 1;
     else
       failures.push(
-        `${name}\n    wanted exit 1 with no state file, got exit ${code}, state written: ${wroteState}\n    stderr: ${stderr.trim().slice(0, 160)}`,
+        `record-verdict accepts a clean tree\n    wanted exit 0 with a state file, got exit ${clean.code}\n    stderr: ${clean.stderr.trim().slice(0, 160)}`,
       );
+    rmSync(verdictFile, { force: true });
   } else {
-    // On a clean tree it must succeed — otherwise the check is a permanent blocker.
-    if (code === 0 && wroteState) passed += 1;
-    else
-      failures.push(
-        `${name} (clean-tree case)\n    wanted exit 0 with a state file, got exit ${code}, state written: ${wroteState}\n    stderr: ${stderr.trim().slice(0, 160)}`,
-      );
+    // Only reachable when a human is mid-edit. CI is always clean here, and the dirty
+    // case below runs unconditionally, so nothing is skipped where it matters.
+    passed += 1;
   }
 
-  rmSync(statePath(`review-${probePr}.json`), { force: true });
+  // ---- dirty tree: must REFUSE, and refuse BEFORE writing ----
+  // An untracked file satisfies `git status --porcelain` and needs no git state to
+  // undo — nothing tracked is touched.
+  writeFileSync(dirtyMarker, 'transient probe for the dirty-tree refusal\n');
+  try {
+    const dirty = runRecordVerdict(args);
+    const wrote = existsSync(verdictFile);
+    // A verdict written and THEN complained about would still open the merge gate, so
+    // the absence of the file is the load-bearing half of this assertion.
+    if (dirty.code === 1 && /dirty working tree/.test(dirty.stderr) && !wrote) passed += 1;
+    else
+      failures.push(
+        `record-verdict refuses a dirty tree\n    wanted exit 1 and NO state file, got exit ${dirty.code}, state written: ${wrote}\n    stderr: ${dirty.stderr.trim().slice(0, 160)}`,
+      );
+  } finally {
+    rmSync(dirtyMarker, { force: true });
+    rmSync(verdictFile, { force: true });
+  }
 }
 
 // ============================================================ report
