@@ -1,7 +1,19 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
-  "globalDependencies": ["**/.env", "packages/config/**"],
+  "globalDependencies": [
+    "**/.env",
+    "packages/config/**",
+    // CI and infra definitions belong to no package, so without these a PR touching
+    // only .github/ or infra/ produced identical task hashes and every cacheable task
+    // replayed from cache — `pnpm test` reporting 158 tests passed having run none,
+    // with no Postgres touched. pr-reviewer proved this on #74 by editing both files
+    // and watching @repo/api#test keep hash 04f645ab5a315e43 with status=HIT.
+    // A Postgres major-version bump would never have been tested.
+    ".github/workflows/**",
+    "infra/**",
+    "turbo.json"
+  ],
   "globalEnv": ["NODE_ENV", "CI"],
   "tasks": {
     "build": {

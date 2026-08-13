@@ -79,6 +79,21 @@ made.
 
 ## 8 · Review
 
+**Before and after every review agent, check the working tree is clean:**
+
+```
+git status --porcelain
+```
+
+Reviewers mutate files to prove a test can fail, and restore them afterwards. An agent that dies
+mid-run — an API error, a timeout — leaves the mutation behind. This happened during F5: a reviewer
+was killed by a 529 while probing whether a leak could escape through the `title` field, and left
+`title: exception.message` in the filter. Committing that would have shipped an
+information-disclosure bug the reviewer was in the middle of _testing for_.
+
+If the tree is dirty when you did not edit anything, read the diff before doing anything else. Do
+not stage it, do not assume it is yours.
+
 Run `pr-reviewer` on the PR. Additionally:
 
 - `security-auditor` if the diff touches auth, checkout, payments, admin or any route definition.
