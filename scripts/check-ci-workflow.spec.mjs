@@ -282,6 +282,18 @@ for (const command of [
   );
 }
 
+// Binds the db:reset EXACT match specifically: a substring check accepts this, because
+// the line still contains "db:reset". Reverting the checker to `includes` left the spec
+// at 47 passed, which is how pr-reviewer found this enforcement had no fixture.
+attack(
+  'db:reset neutralised with || true (exact-match coverage)',
+  ({ workflow }) => {
+    stepIn(workflow, 'migrations-replay', (step) => step.run === 'pnpm db:reset').run =
+      'pnpm db:reset || true';
+  },
+  'does not run "pnpm db:reset"',
+);
+
 attack(
   'the replay job reverting to db:migrate',
   ({ workflow }) => {
@@ -317,6 +329,57 @@ attack(
     );
   },
   'merge gate is unguarded',
+);
+
+/**
+ * working-directory changes WHAT a command covers while leaving its text byte-identical,
+ * so exact matching is blind to it. Verified consequence: `packages/contracts` on the
+ * Test step exits 0 having run 92 contract tests, while the 158 API tests — everything
+ * needing the Postgres service, i.e. all of AC2 — never run (pr-reviewer).
+ */
+attack(
+  'working-directory on the Test step (all 158 API tests silently skipped)',
+  ({ workflow }) => {
+    testStep(workflow)['working-directory'] = 'packages/contracts';
+  },
+  'sets working-directory',
+);
+
+attack(
+  'job-level defaults.run.working-directory',
+  ({ workflow }) => {
+    workflow.jobs.gate.defaults = { run: { 'working-directory': 'packages/contracts' } };
+  },
+  'defaults.run.working-directory',
+);
+
+attack(
+  'workflow-level defaults.run.working-directory',
+  ({ workflow }) => {
+    workflow.defaults = { run: { 'working-directory': 'packages/contracts' } };
+  },
+  'defaults.run.working-directory',
+);
+
+// The I9 step is a multi-line block, so it cannot be exact-matched. These two prove the
+// substitute — "grep must actually be invoked, and the step must be able to fail" —
+// binds. Substring matching alone accepted a no-op that merely mentioned the strings.
+attack(
+  'the whole I9 step replaced by a no-op that merely mentions the strings',
+  ({ workflow }) => {
+    stepIn(workflow, 'harness', (step) => String(step.run ?? '').includes('only|skip')).run =
+      "true # only|skip '*.spec.ts' '*.e2e-spec.ts' '*.spec.tsx'";
+  },
+  'never invokes grep',
+);
+
+attack(
+  'the I9 grep left in place but unable to fail',
+  ({ workflow }) => {
+    const step = stepIn(workflow, 'harness', (s) => String(s.run ?? '').includes('only|skip'));
+    step.run = step.run.replace(/exit 1/g, 'exit 0');
+  },
+  'never exits non-zero',
 );
 
 attack(

@@ -134,6 +134,19 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
           `step "${label}" in "${name}" sets a custom shell (${String(step.shell)}) — it can neutralise the command`,
         );
       }
+
+      // working-directory changes WHAT a command operates on while leaving the run:
+      // body byte-identical, so exact matching cannot see it. Verified consequence:
+      // `working-directory: packages/contracts` on the gate's Test step exits 0 having
+      // run 92 contract tests, while the 158 API tests — everything that needs the
+      // Postgres service, i.e. all of AC2 — never run, and every check reports green
+      // (pr-reviewer). The gate must run from the repo root.
+      if (step['working-directory'] !== undefined) {
+        problems.push(
+          `step "${label}" in "${name}" sets working-directory (${String(step['working-directory'])}) — ` +
+            'this changes which packages the command covers while leaving its text unchanged',
+        );
+      }
     }
   }
 
@@ -143,9 +156,15 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
     ...REQUIRED_JOBS.map((name) => [`job "${name}"`, jobs[name]?.defaults]),
   ]) {
     const shell = defaults?.run?.shell;
-    if (shell && !/^(bash|sh|pwsh|powershell|python)$/.test(String(shell).trim())) {
+    if (shell && !SAFE_SHELLS.test(String(shell).trim())) {
       problems.push(
         `${scope} sets a custom "defaults.run.shell" (${String(shell)}) — this can neutralise every run: step at once`,
+      );
+    }
+    // Same hazard as the step-level key, applied to every step at once.
+    if (defaults?.run?.['working-directory'] !== undefined) {
+      problems.push(
+        `${scope} sets "defaults.run.working-directory" — every command would run somewhere other than the repo root`,
       );
     }
   }
@@ -214,16 +233,39 @@ export function findPipelineProblems({ workflow, turbo, workflowText, turboText 
       'the harness job no longer runs the hook test suite — the merge gate is unguarded',
     );
   }
-  if (!harnessRuns.includes('only|skip')) {
+  // The I9 grep is a multi-line shell block, so it cannot be exact-matched like a
+  // single command. Instead the step that CONTAINS the pattern must genuinely invoke
+  // grep: substring-matching alone let `true # only|skip '*.spec.ts' …` satisfy all
+  // four of these assertions while enforcing nothing (pr-reviewer).
+  const i9Step = (jobs.harness?.steps ?? []).find((step) =>
+    normaliseRun(step.run).includes('only|skip'),
+  );
+
+  if (!i9Step) {
     problems.push('the harness job no longer greps for .only/.skip (F6/AC4, I9)');
-  }
-  // Narrowing the include globs makes .only plantable again while the grep still reads
-  // as present, so the suffixes actually in use are asserted individually.
-  // Quoted, because '*.spec.tsx' CONTAINS '*.spec.ts' — an unquoted substring check was
-  // satisfied by the wrong glob, which the spec caught on its first run.
-  for (const suffix of ['*.spec.ts', '*.e2e-spec.ts', '*.spec.tsx']) {
-    if (!harnessRuns.includes(`'${suffix}'`)) {
-      problems.push(`the I9 grep no longer covers "${suffix}" — .only becomes plantable there`);
+  } else {
+    const body = normaliseRun(i9Step.run);
+    const lines = body.split('\n');
+
+    // A real invocation, not a mention: grep must start a line (allowing `if `), and
+    // the step must be able to fail.
+    if (!lines.some((line) => /^(if\s+)?grep\b/.test(line))) {
+      problems.push(
+        'the I9 step mentions "only|skip" but never invokes grep at the start of a line — ' +
+          'a comment or an echoed string enforces nothing',
+      );
+    }
+    if (!body.includes('exit 1')) {
+      problems.push(
+        'the I9 step never exits non-zero, so a planted .only would not fail the build',
+      );
+    }
+    // Quoted, because '*.spec.tsx' CONTAINS '*.spec.ts' — an unquoted check was
+    // satisfied by the wrong glob, which the spec caught on its first run.
+    for (const suffix of ['*.spec.ts', '*.e2e-spec.ts', '*.spec.tsx']) {
+      if (!body.includes(`'${suffix}'`)) {
+        problems.push(`the I9 grep no longer covers "${suffix}" — .only becomes plantable there`);
+      }
     }
   }
 
