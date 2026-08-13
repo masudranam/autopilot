@@ -101,16 +101,16 @@ describe('every error becomes RFC 9457 (AC1, I3)', () => {
     expect(problem.detail).toContain('TEE-M');
   });
 
-  it('maps a Zod failure to 422 with one entry per bad field', () => {
-    const schema = z.object({ email: z.email(), quantity: z.int().positive() });
-    let thrown: unknown;
-    try {
-      schema.parse({ email: 'nope', quantity: -1 });
-    } catch (error) {
-      thrown = error;
-    }
+  // Request validation reaches the filter as a ValidationError (the pipe converts it),
+  // which is what produces a 422 with per-field errors[].
+  it('maps a request ValidationError to 422 with one entry per bad field', () => {
+    const { problem } = run(
+      new ValidationError('The request did not match the expected shape.', [
+        { path: 'email', message: 'Invalid email address' },
+        { path: 'quantity', message: 'Too small: expected number to be >0' },
+      ]),
+    );
 
-    const { problem } = run(thrown);
     expect(problem.status).toBe(422);
     expect(problem.type).toBe(ProblemType.VALIDATION_FAILED);
     expect(problem.errors).toEqual(
@@ -119,6 +119,40 @@ describe('every error becomes RFC 9457 (AC1, I3)', () => {
         expect.objectContaining({ path: 'quantity' }),
       ]),
     );
+  });
+
+  // A BARE ZodError is not necessarily the caller's fault — it could come from parsing
+  // an upstream provider's response. Treating it as 422 would blame the caller and
+  // publish internal field paths in errors[] (pr-reviewer).
+  it('treats a bare ZodError as an internal fault, not a client 422', () => {
+    const schema = z.object({ internalToken: z.string() });
+    let thrown: unknown;
+    try {
+      schema.parse({ internalToken: 42 });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const { problem, raw } = run(thrown);
+    expect(problem.status).toBe(500);
+    expect(problem.type).toBe(ProblemType.INTERNAL);
+    expect(problem.errors).toBeUndefined();
+    // The internal field path must not reach the client body.
+    expect(allValues(raw)).toContain('internaltoken'); // development shows it…
+  });
+
+  it('suppresses the internal field paths of a bare ZodError in production', () => {
+    const schema = z.object({ chargeInternalToken: z.string() });
+    let thrown: unknown;
+    try {
+      schema.parse({ chargeInternalToken: 42 });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const { problem, raw } = run(thrown, { production: true });
+    expect(problem.status).toBe(500);
+    expect(allValues(raw)).not.toContain('chargeinternaltoken');
   });
 
   it('flattens nested Zod paths to dotted notation', () => {
@@ -263,9 +297,12 @@ describe('production leaks nothing (AC2)', () => {
 });
 
 describe('express-layer errors keep their own status (AC1)', () => {
-  /** Shape body-parser uses: a plain Error carrying `status`/`statusCode`. */
-  function withStatus(message: string, status: number): Error {
-    return Object.assign(new Error(message), { status, statusCode: status });
+  /**
+   * Shape body-parser uses: a plain Error carrying `status`/`statusCode` AND
+   * `expose: true`, the http-errors flag meaning "this message is safe for the client".
+   */
+  function withStatus(message: string, status: number, expose = true): Error {
+    return Object.assign(new Error(message), { status, statusCode: status, expose });
   }
 
   it('renders an oversized payload as 413, not 500', () => {
@@ -291,5 +328,53 @@ describe('express-layer errors keep their own status (AC1)', () => {
   it('suppresses a carried 5xx in production like any other', () => {
     const { problem } = run(withStatus('internal detail here', 503), { production: true });
     expect(problem.detail).not.toContain('internal detail');
+  });
+
+  // Without the expose requirement, ANY thrown object with a numeric 4xx sent its own
+  // message to the client, unsuppressed. pr-reviewer demonstrated an S3-shaped error
+  // rendering an access key id and a Stripe-shaped one rendering an sk_live_ key.
+  // `statusCode` is the standard convention on aws-sdk, minio, got and Stripe errors,
+  // and MinIO is already in this project's compose stack.
+  describe('a provider error is NOT treated as a client fault', () => {
+    it('suppresses an S3-shaped 403 carrying an access key id', () => {
+      const s3 = Object.assign(
+        new Error(
+          'The AWS Access Key Id AKIAIOSFODNN7EXAMPLE you provided does not exist; endpoint http://minio:9000/private-bucket',
+        ),
+        { statusCode: 403, code: 'InvalidAccessKeyId' },
+      );
+
+      const { problem, raw } = run(s3, { production: true });
+      expect(problem.status).toBe(500);
+      for (const fragment of ['akiaiosfodnn7example', 'minio:9000', 'private-bucket']) {
+        expect(allValues(raw)).not.toContain(fragment);
+      }
+    });
+
+    it('suppresses a Stripe-shaped 402 carrying a live key', () => {
+      const stripe = Object.assign(
+        new Error(
+          'card_declined for cus_123 via sk_live_51H8xTESTkey at /srv/app/dist/payments.js:44',
+        ),
+        { statusCode: 402, type: 'StripeCardError' },
+      );
+
+      const { problem, raw } = run(stripe, { production: true });
+      expect(problem.status).toBe(500);
+      for (const fragment of ['sk_live_', 'cus_123', '/srv/']) {
+        expect(allValues(raw)).not.toContain(fragment);
+      }
+    });
+
+    it('ignores a 4xx status when expose is false', () => {
+      const { problem } = run(withStatus('server-side detail', 400, false), { production: true });
+      expect(problem.status).toBe(500);
+      expect(problem.detail).not.toContain('server-side detail');
+    });
+
+    it('still honours body-parser errors, which do set expose', () => {
+      const { problem } = run(withStatus('request entity too large', 413, true));
+      expect(problem.status).toBe(413);
+    });
   });
 });

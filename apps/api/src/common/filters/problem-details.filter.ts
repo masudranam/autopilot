@@ -69,15 +69,24 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       };
     }
 
+    // Only a ZodError raised while validating THIS request's input is the caller's
+    // fault. A bare ZodError could equally come from parsing an upstream provider's
+    // response, and mapping that to 422 both blames the caller for an internal
+    // integration failure and publishes internal field paths in `errors[]`
+    // (pr-reviewer: `charge.internalToken` leaking to a client). ValidationError —
+    // which the request-validation pipe throws — is the explicit signal; anything else
+    // falls through to the 500 branch and is suppressed in production.
     if (exception instanceof ZodError) {
       return {
-        type: ProblemType.VALIDATION_FAILED,
-        title: 'Validation failed',
-        status: 422,
-        detail: 'The request did not match the expected shape.',
+        type: ProblemType.INTERNAL,
+        title: 'Internal server error',
+        status: 500,
+        detail: this.detailFor(
+          500,
+          `Unhandled validation failure: ${exception.issues.map((issue) => issue.path.join('.')).join(', ')}`,
+        ),
         instance,
         traceId,
-        errors: zodToFieldErrors(exception),
       };
     }
 
@@ -153,14 +162,34 @@ export function zodToFieldErrors(error: ZodError): FieldError[] {
 /**
  * A `status`/`statusCode` carried by a non-HttpException error — express-layer errors
  * such as body-parser's PayloadTooLargeError (413) use this convention.
+ *
+ * Requires `expose === true`, the http-errors flag that means "this message is safe to
+ * send to the client". Without that condition, ANY thrown object with a numeric 4xx
+ * became a client response carrying its own message: pr-reviewer demonstrated an
+ * S3-shaped error rendering an access key id, and a Stripe-shaped one rendering an
+ * `sk_live_` key, both as unsuppressed 4xx bodies in production. `statusCode` is the
+ * standard convention on aws-sdk, minio, got and Stripe errors, and MinIO is already
+ * in this project's compose stack — so a provider client would have opened that hole
+ * the day it landed.
+ *
+ * body-parser sets `expose: true` for its own client-fault errors (400 malformed JSON,
+ * 413 too large, 415 wrong type) and `false` for server faults, which is exactly the
+ * distinction wanted here.
  */
 function carriedStatus(exception: unknown): number | undefined {
   if (!exception || typeof exception !== 'object') return undefined;
-  const candidate = exception as { status?: unknown; statusCode?: unknown };
+  const candidate = exception as { status?: unknown; statusCode?: unknown; expose?: unknown };
+
+  // Anything that has not explicitly declared its message client-safe falls through
+  // to the generic 500 branch, where production suppression applies.
+  if (candidate.expose !== true) return undefined;
+
   const value = typeof candidate.status === 'number' ? candidate.status : candidate.statusCode;
   if (typeof value !== 'number') return undefined;
-  // Only trust a plausible client/server status; anything else is coincidence.
-  return value >= 400 && value <= 599 ? value : undefined;
+
+  // Only a plausible client status. A 5xx marked expose still goes to the fallback so
+  // suppression is decided in one place.
+  return value >= 400 && value <= 499 ? value : undefined;
 }
 
 function httpExceptionDetail(exception: HttpException): string {
