@@ -6,8 +6,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { randomUUID } from 'node:crypto';
 import { ProblemType, type ProblemDetails } from '@repo/contracts';
+import { currentTraceId } from '../../common/trace/trace';
 import { HealthService } from './health.service';
 
 /**
@@ -58,7 +58,9 @@ export class HealthController {
       status: 503,
       detail: `Unreachable: ${failing.map(([name]) => name).join(', ')}`,
       instance: '/health/ready',
-      traceId: randomUUID(),
+      // The request's real trace id, so this body, X-Trace-Id and the logs agree
+      // (F5/AC3). Previously a standalone UUID that correlated with nothing.
+      traceId: currentTraceId(),
     } satisfies ProblemDetails;
 
     res.status(503).type('application/problem+json').json(problem);
