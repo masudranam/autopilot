@@ -63,7 +63,12 @@ async function buildApp(nodeEnv: 'development' | 'production'): Promise<INestApp
   return app;
 }
 
-/** Production validation requires these explicitly (F4/#65). */
+/**
+ * Production validation requires these explicitly (F4/#65, and the JWT keys since F8).
+ *
+ * The secrets are test values, not the repository's development defaults — production
+ * validation rejects those by name, which is the point of that rule.
+ */
 function productionUrls(nodeEnv: string): Record<string, string> {
   if (nodeEnv !== 'production') return {};
   return {
@@ -71,6 +76,8 @@ function productionUrls(nodeEnv: string): Record<string, string> {
       process.env.DATABASE_URL ??
       'postgresql://ecommerce:ecommerce_dev_password@localhost:5442/ecommerce?schema=public',
     REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6389',
+    JWT_ACCESS_SECRET: 'error-handling-suite-access-key-000000',
+    JWT_REFRESH_SECRET: 'error-handling-suite-refresh-key-00000',
   };
 }
 

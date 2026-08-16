@@ -13,7 +13,37 @@ import { z } from 'zod';
  * deploy with no configuration boots green against localhost with the committed dev
  * password, and a missing REDIS_URL points sessions at whatever answers on 6389.
  */
-const PRODUCTION_REQUIRED = ['DATABASE_URL', 'REDIS_URL'] as const;
+const PRODUCTION_REQUIRED = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'JWT_ACCESS_SECRET',
+  'JWT_REFRESH_SECRET',
+] as const;
+
+/**
+ * Development-only signing keys.
+ *
+ * They exist for the same reason the localhost DATABASE_URL default does — a fresh
+ * clone has to run `pnpm dev` and the test suite without anyone writing a `.env` — and
+ * they are safe only because they can never be used in production: the names are in
+ * PRODUCTION_REQUIRED, so the variable must be set explicitly there, AND the refinement
+ * below rejects these exact strings even if someone copies them into a production
+ * environment. Both halves matter: "must be set" alone is satisfied by pasting the
+ * default back in.
+ */
+const DEV_ACCESS_SECRET = 'development-only-access-secret-do-not-use-in-production';
+const DEV_REFRESH_SECRET = 'development-only-refresh-secret-do-not-use-in-production';
+
+const DEVELOPMENT_ONLY_SECRETS: Readonly<Partial<Record<string, string>>> = {
+  JWT_ACCESS_SECRET: DEV_ACCESS_SECRET,
+  JWT_REFRESH_SECRET: DEV_REFRESH_SECRET,
+};
+
+/**
+ * Minimum secret length. HS256 keys shorter than the 256-bit digest weaken the MAC,
+ * and a short one is invariably a human-chosen password rather than CSPRNG output.
+ */
+export const JWT_SECRET_MIN_LENGTH = 32;
 
 export const envSchema = z
   .object({
@@ -33,17 +63,62 @@ export const envSchema = z
      * being read with a bare process.env, contradicting this file's own header.
      */
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+    /**
+     * HS256 signing key for the 15-minute access token (F8).
+     *
+     * `.min()` before `.default()` would not check the default itself; declaring the
+     * default on the string schema means the constraint applies to whatever value ends
+     * up being used, development one included.
+     */
+    JWT_ACCESS_SECRET: z
+      .string()
+      .min(
+        JWT_SECRET_MIN_LENGTH,
+        `Must be at least ${JWT_SECRET_MIN_LENGTH} characters — generate one with 'openssl rand -hex 32'`,
+      )
+      .default(DEV_ACCESS_SECRET),
+    /**
+     * Keyed hashing for refresh tokens (F8). The stored value is
+     * `HMAC-SHA256(JWT_REFRESH_SECRET, token)`, so a leaked database dump alone does
+     * not let an attacker confirm a guessed token — they need the key as well.
+     */
+    JWT_REFRESH_SECRET: z
+      .string()
+      .min(
+        JWT_SECRET_MIN_LENGTH,
+        `Must be at least ${JWT_SECRET_MIN_LENGTH} characters — generate one with 'openssl rand -hex 32'`,
+      )
+      .default(DEV_REFRESH_SECRET),
+    /**
+     * Whether to serve /api/docs, /api/docs-json and /api/docs-yaml (issue #66).
+     *
+     * Left unset it follows NODE_ENV, which is what almost every deployment wants; the
+     * explicit form exists for the staging box that genuinely wants the document, and
+     * for turning docs OFF in development while reproducing a production problem.
+     */
+    DOCS_ENABLED: z.stringbool().optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
     for (const name of PRODUCTION_REQUIRED) {
       // A default that "validated" is indistinguishable from a set value after
       // parsing, so the check must consult the raw source captured below.
-      if (!rawSourceBeingValidated?.[name]) {
+      const supplied = rawSourceBeingValidated?.[name];
+      if (!supplied) {
         ctx.addIssue({
           code: 'custom',
           path: [name],
           message: `${name} must be set explicitly in production — the development default (localhost, committed dev credentials) must never be silently inherited`,
+        });
+        continue;
+      }
+      // Set, but set to the value that ships in this repository. "Explicit" is not the
+      // property that matters; "not publicly known" is.
+      if (supplied === DEVELOPMENT_ONLY_SECRETS[name]) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: `${name} is the development default, which is committed to this repository and therefore public — generate a real one with 'openssl rand -hex 32'`,
         });
       }
     }
@@ -61,6 +136,18 @@ export type Env = z.infer<typeof envSchema> & {
    * runs with zero setup — it is only disclosure that fails closed.
    */
   readonly suppressInternalErrors: boolean;
+
+  /**
+   * Whether the OpenAPI document and its Swagger UI are mounted at all (issue #66).
+   *
+   * Derived the same fail-closed way as `suppressInternalErrors`, and for the same
+   * reason: once authenticated routes exist, the document is a complete, machine-
+   * readable map of the attack surface — every path, every parameter, every shape —
+   * served to anonymous callers. `DOCS_ENABLED` overrides when set; otherwise only an
+   * EXPLICIT development or test NODE_ENV enables it, so an unconfigured deploy serves
+   * no document rather than deciding it must be a dev box.
+   */
+  readonly docsEnabled: boolean;
 };
 
 /**
@@ -84,9 +171,11 @@ export function validateEnv(source: NodeJS.ProcessEnv = process.env): Env {
     }
 
     const explicit = source.NODE_ENV;
+    const isExplicitNonProduction = explicit === 'development' || explicit === 'test';
     return {
       ...result.data,
-      suppressInternalErrors: explicit !== 'development' && explicit !== 'test',
+      suppressInternalErrors: !isExplicitNonProduction,
+      docsEnabled: result.data.DOCS_ENABLED ?? isExplicitNonProduction,
     };
   } finally {
     rawSourceBeingValidated = undefined;

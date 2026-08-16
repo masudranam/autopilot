@@ -6,8 +6,9 @@
  * and seeded once before jest starts; the idempotency test then re-runs the seed
  * in-process and asserts the state fingerprint did not change at all.
  */
+import { verify } from '@node-rs/argon2';
 import { createPrismaClient, type PrismaClient } from '../src/db/client';
-import { seed } from './seed';
+import { seed, SEED_ACCOUNT_PASSWORD } from './seed';
 
 let prisma: PrismaClient;
 
@@ -162,7 +163,15 @@ describe('the catalogue is browsable (AC4)', () => {
     expect(await prisma.user.count({ where: { role: 'CUSTOMER' } })).toBeGreaterThanOrEqual(1);
   });
 
-  it('seeded accounts carry unverifiable placeholder hashes, not real-looking ones', async () => {
+  /**
+   * Since F8 the demo accounts are genuinely signable-in.
+   *
+   * The password is asserted through the library's own `verify` — the only proof that
+   * what is stored is a usable credential rather than a plausible-looking string — and
+   * the hash is checked to be Argon2id at the ADR-0009 cost, so a seed that quietly
+   * wrote a cheaper hash fails here.
+   */
+  it('seeded accounts carry real Argon2id hashes of the documented dev password', async () => {
     const users = await prisma.user.findMany({
       where: { email: { endsWith: SEED_EMAIL_DOMAIN } },
       select: { email: true, passwordHash: true },
@@ -173,7 +182,105 @@ describe('the catalogue is browsable (AC4)', () => {
     expect(users.map((user) => user.email)).toEqual(SEEDED_EMAILS);
 
     for (const user of users) {
-      expect(user.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
+      expect(user.passwordHash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
+      await expect(verify(user.passwordHash, SEED_ACCOUNT_PASSWORD)).resolves.toBe(true);
+      await expect(verify(user.passwordHash, `${SEED_ACCOUNT_PASSWORD}x`)).resolves.toBe(false);
     }
+
+    // Salted per account: two demo users sharing one password must not share a hash.
+    expect(new Set(users.map((user) => user.passwordHash)).size).toBe(users.length);
+  });
+});
+
+/**
+ * The credential guard (security review of PR #78).
+ *
+ * `SEED_ACCOUNT_PASSWORD` is committed to this repository and one seeded account is an
+ * ADMIN, so a *verifiable* hash of it is a published administrator credential anywhere
+ * but a throwaway local database. The test above asserts the hash works; this one
+ * asserts it only works where it is safe, which is the half that stops the seed being
+ * an authentication bypass on a demo or staging box.
+ *
+ * Runs last and restores the usable hashes afterwards, so the assertions above — and a
+ * developer's own database — are unaffected.
+ */
+describe('the seed only writes a usable credential on a local database', () => {
+  const realDatabaseUrl = process.env.DATABASE_URL;
+
+  /** Assigning `undefined` would set the literal string "undefined". */
+  function restoreDatabaseUrl(): void {
+    if (realDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = realDatabaseUrl;
+  }
+
+  afterAll(async () => {
+    restoreDatabaseUrl();
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    await seed(prisma);
+  });
+
+  /**
+   * The regression this guard shipped with, caught by CI rather than by a test.
+   *
+   * `turbo.json` does not list `DATABASE_URL` in `globalEnv`, and Turbo 2 defaults to
+   * `envMode: strict`, so the variable is stripped from the test task — absent is the
+   * NORMAL case in CI, not a warning sign. The first version of the guard treated
+   * absent as hostile and wrote an unusable hash, which failed the Argon2id assertion
+   * above. Absent means the client falls back to its hard-coded loopback URL, so this
+   * asserts the guard reads it that way.
+   */
+  it('still writes a usable hash when DATABASE_URL is absent, as it is in CI', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    delete process.env.DATABASE_URL;
+
+    try {
+      await seed(prisma);
+    } finally {
+      restoreDatabaseUrl();
+    }
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { passwordHash: true },
+    });
+    expect(admin?.passwordHash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
+  });
+
+  it('writes an unusable hash when DATABASE_URL names a remote host', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    process.env.DATABASE_URL = 'postgresql://app:pw@db.staging.example.com:5432/app?schema=public';
+
+    await seed(prisma);
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { role: true, passwordHash: true },
+    });
+
+    // The account still exists — F3/AC4 wants a browsable catalogue everywhere. It is
+    // the credential that is withheld, not the seed.
+    expect(admin?.role).toBe('ADMIN');
+    expect(admin?.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
+    // Not merely "different" — nothing Argon2id could ever verify against.
+    expect(admin?.passwordHash.startsWith('$argon2id$')).toBe(false);
+  });
+
+  it('writes an unusable hash when NODE_ENV is production, even on loopback', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    process.env.DATABASE_URL = realDatabaseUrl;
+    const realNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      await seed(prisma);
+    } finally {
+      process.env.NODE_ENV = realNodeEnv;
+    }
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { passwordHash: true },
+    });
+    expect(admin?.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
   });
 });

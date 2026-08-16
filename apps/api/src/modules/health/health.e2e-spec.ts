@@ -24,7 +24,11 @@ describe('health endpoints (F4)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication({ bodyParser: false });
-    configureApp(app, validateEnv({}));
+    // NODE_ENV is passed explicitly since #66: the OpenAPI document is served only in
+    // an explicitly non-production environment, and `validateEnv({})` — nothing set at
+    // all — is now the fail-closed case that serves no document. The gate itself is
+    // tested in app.setup.e2e-spec.ts; this suite needs docs on to assert AC4 below.
+    configureApp(app, validateEnv({ NODE_ENV: 'test' }));
     await app.init();
   });
 

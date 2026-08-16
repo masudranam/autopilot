@@ -74,14 +74,17 @@ Offset from defaults because 5432, 5433 and 4200 are already occupied on the dev
 
 Every variable is declared in the Zod schema at `apps/api/src/config/env.ts` and nowhere else.
 
-| Variable       | Default (non-production) | Notes                                                                |
-| -------------- | ------------------------ | -------------------------------------------------------------------- |
-| `NODE_ENV`     | `development`            | Absent or unrecognised means internal error detail is **suppressed** |
-| `API_PORT`     | `3001`                   |                                                                      |
-| `API_PREFIX`   | `api/v1`                 |                                                                      |
-| `DATABASE_URL` | compose stack            | **Required explicitly** when `NODE_ENV=production`                   |
-| `REDIS_URL`    | compose stack            | **Required explicitly** when `NODE_ENV=production`                   |
-| `LOG_LEVEL`    | unset                    | Un-silences structured logs under `NODE_ENV=test`                    |
+| Variable             | Default (non-production) | Notes                                                                                                                                   |
+| -------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`           | `development`            | Absent or unrecognised means internal error detail is **suppressed**                                                                    |
+| `API_PORT`           | `3001`                   |                                                                                                                                         |
+| `API_PREFIX`         | `api/v1`                 |                                                                                                                                         |
+| `DATABASE_URL`       | compose stack            | **Required explicitly** when `NODE_ENV=production`                                                                                      |
+| `REDIS_URL`          | compose stack            | **Required explicitly** when `NODE_ENV=production`                                                                                      |
+| `LOG_LEVEL`          | unset                    | Un-silences structured logs under `NODE_ENV=test`                                                                                       |
+| `JWT_ACCESS_SECRET`  | committed dev value      | HS256 key for the access token. ≥32 chars. **Required explicitly** in production, and the committed development value is rejected there |
+| `JWT_REFRESH_SECRET` | committed dev value      | HMAC key for refresh-token hashes. Same rules. Rotating it invalidates every refresh token                                              |
+| `DOCS_ENABLED`       | unset                    | Serves `/api/docs*`. Unset follows `NODE_ENV` and **fails closed** — absent or unrecognised means no document (#66)                     |
 
 ---
 
@@ -240,6 +243,24 @@ Access JWT (15 min, stateless) + refresh token (30 d, rotating, stored hashed an
 Refresh reuse detection: presenting an already-rotated refresh token revokes the whole session
 family. Roles: `CUSTOMER`, `SUPPORT`, `ADMIN`.
 
+_Detail settled in F8:_
+
+- The access token is HS256 with claims `{ sub, sid, iss, aud, iat, exp }` — `sid` is the session
+  that minted it, so F9 can revoke a token's lineage. No `role` claim until the Prisma enum is
+  generated into `@repo/contracts` (F10).
+- The refresh token is **opaque** (256 bits of CSPRNG output), not a JWT, and what is stored is
+  `HMAC-SHA256(JWT_REFRESH_SECRET, token)` — keyed, so a database dump alone cannot confirm a
+  guessed token; deterministic, so the row is found by its unique index. Argon2id is deliberately
+  not used here: the input is high-entropy, and a salted hash could not be looked up at all.
+- Rotation is a conditional `UPDATE … WHERE rotated_at IS NULL` inside a transaction. The loser of a
+  race is treated as reuse, and **there is no grace window** — two simultaneous refreshes cost the
+  family, which is the price of the rule in §60-security ("evidence of theft, not a retry"). Clients
+  serialise their refreshes.
+- The refresh cookie is `httpOnly; secure; sameSite=strict`, scoped to `/<API_PREFIX>/auth`.
+- `Session.rotatedAt` was added in F8 (migration `session_rotation_tracking`): it is both the
+  used-flag that makes rotation atomic and the evidence that makes reuse detectable, so rotated rows
+  are kept rather than deleted.
+
 ### 6.5 · Pagination
 
 Cursor-based on every list endpoint:
@@ -291,7 +312,10 @@ Dependencies are hard ordering constraints.
 - AC3 `pnpm db:reset && pnpm db:seed` succeeds twice in a row with identical resulting state (I7,
   I8).
 - AC4 Seed produces a browsable catalogue: ≥3 categories, ≥2 brands, ≥20 products with variants,
-  stock and prices, plus one admin and one customer account.
+  stock and prices, plus one admin and one customer account. _(Amended in F8: the two accounts now
+  carry real Argon2id hashes of the development password exported as `SEED_ACCOUNT_PASSWORD`, so
+  they can actually sign in through `POST /auth/login`. Hashed only on creation, so a second seed
+  run still writes nothing — I8 holds.)_
 - AC5 Money columns are `Int` minor units + currency (I1).
 
 **F4 · API bootstrap** — _deps: F3_
@@ -301,7 +325,10 @@ Dependencies are hard ordering constraints.
   naming the variable.
 - AC3 `GET /health` returns 200 always; `GET /health/ready` returns 200 only when Postgres and Redis
   both answer, and 503 with a Problem Details body when either does not.
-- AC4 OpenAPI served at `/api/docs`.
+- AC4 OpenAPI served at `/api/docs`. _(Amended in F8, closing #66: served only where
+  `DOCS_ENABLED`/`NODE_ENV` says so. The default fails closed — an unconfigured or production
+  deployment serves 404 on `/api/docs`, `/api/docs-json` and `/api/docs-yaml`, because once
+  authenticated routes exist the document is a machine-readable index of the attack surface.)_
 
 **F5 · Error handling & logging** — _deps: F4_
 
@@ -339,6 +366,13 @@ Dependencies are hard ordering constraints.
 - AC3 Presenting a rotated (reused) refresh token revokes the entire session family and returns 401.
 - AC4 Wrong credentials return 401 with a generic message, in constant time relative to a valid one.
 - AC5 Access tokens expire in 15 minutes; expired tokens return 401, not 500.
+
+_Note on AC5:_ F8 ships the `JwtAuthGuard` that turns a bearer token into verified claims, but does
+NOT register it globally — "a route with no decorator is denied by default" is F10/AC3 and needs
+`@Roles()` in the same change. F8 therefore has no protected production route to point AC5 at (`/me`
+is F12, `/auth/sessions` is F9), so the end-to-end 401-not-500 test mounts the real guard on a probe
+controller declared inside `jwt-auth.guard.e2e-spec.ts`. Everything under test — guard, token
+service, Problem Details filter, wiring — is production code; only the route is synthetic.
 
 **F9 · Sessions** — _deps: F8_
 
