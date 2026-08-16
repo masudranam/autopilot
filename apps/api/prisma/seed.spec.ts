@@ -191,3 +191,63 @@ describe('the catalogue is browsable (AC4)', () => {
     expect(new Set(users.map((user) => user.passwordHash)).size).toBe(users.length);
   });
 });
+
+/**
+ * The credential guard (security review of PR #78).
+ *
+ * `SEED_ACCOUNT_PASSWORD` is committed to this repository and one seeded account is an
+ * ADMIN, so a *verifiable* hash of it is a published administrator credential anywhere
+ * but a throwaway local database. The test above asserts the hash works; this one
+ * asserts it only works where it is safe, which is the half that stops the seed being
+ * an authentication bypass on a demo or staging box.
+ *
+ * Runs last and restores the usable hashes afterwards, so the assertions above — and a
+ * developer's own database — are unaffected.
+ */
+describe('the seed only writes a usable credential on a local database', () => {
+  const realDatabaseUrl = process.env.DATABASE_URL;
+
+  afterAll(async () => {
+    process.env.DATABASE_URL = realDatabaseUrl;
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    await seed(prisma);
+  });
+
+  it('writes an unusable hash when DATABASE_URL names a remote host', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    process.env.DATABASE_URL = 'postgresql://app:pw@db.staging.example.com:5432/app?schema=public';
+
+    await seed(prisma);
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { role: true, passwordHash: true },
+    });
+
+    // The account still exists — F3/AC4 wants a browsable catalogue everywhere. It is
+    // the credential that is withheld, not the seed.
+    expect(admin?.role).toBe('ADMIN');
+    expect(admin?.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
+    // Not merely "different" — nothing Argon2id could ever verify against.
+    expect(admin?.passwordHash.startsWith('$argon2id$')).toBe(false);
+  });
+
+  it('writes an unusable hash when NODE_ENV is production, even on loopback', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    process.env.DATABASE_URL = realDatabaseUrl;
+    const realNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      await seed(prisma);
+    } finally {
+      process.env.NODE_ENV = realNodeEnv;
+    }
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { passwordHash: true },
+    });
+    expect(admin?.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
+  });
+});

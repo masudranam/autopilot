@@ -30,6 +30,43 @@ import type { PrismaClient } from '../src/db/client';
  */
 export const SEED_ACCOUNT_PASSWORD = 'seed-development-password-not-for-production';
 
+/** Mirrors `scripts/db-reset.mjs` — one definition of "this is a dev database". */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * A hash no verifier can ever match. Argon2id parses `$argon2id$…`; this is not that
+ * shape, so `verify` rejects it rather than throwing something a caller might mistake
+ * for a match.
+ */
+const UNUSABLE_HASH = 'SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH';
+
+/**
+ * Whether this run may write a password that actually logs in.
+ *
+ * `SEED_ACCOUNT_PASSWORD` is committed to a repository, and one of the two seeded
+ * accounts is an ADMIN. Writing a *verifiable* hash of it is therefore only safe on a
+ * throwaway local database — anywhere else it is a published administrator credential,
+ * which is an authentication bypass rather than a convenience.
+ *
+ * Fails closed: an unparseable or absent `DATABASE_URL` yields `false`, and so does an
+ * explicit production `NODE_ENV` even on loopback. Same guard and the same known limit
+ * as `scripts/db-reset.mjs`: a tunnel to a remote database lands on 127.0.0.1 and would
+ * pass, so this stops an accident, not a determined operator.
+ *
+ * The catalogue still seeds everywhere — F3/AC4 asks for something browsable, and that
+ * requirement is what makes people run this on demo boxes in the first place. Only the
+ * credential is withheld.
+ */
+function mayWriteUsableCredentials(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+
+  try {
+    return LOOPBACK_HOSTS.has(new URL(process.env.DATABASE_URL ?? '').hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Deterministic round-robin pick — total, so noUncheckedIndexedAccess stays honest. */
 function cycle<T>(items: readonly T[], index: number): T {
   const item = items[index % items.length];
@@ -163,8 +200,11 @@ async function ensureUser(
       lastName,
       // Hashed here rather than pasted as a constant: a literal hash would pin one
       // salt into the repository and would silently stop matching the day the cost
-      // parameters change.
-      passwordHash: await hash(SEED_ACCOUNT_PASSWORD, ARGON2_PARAMETERS),
+      // parameters change. Off a dev database this writes an unusable value instead —
+      // see `mayWriteUsableCredentials`.
+      passwordHash: mayWriteUsableCredentials()
+        ? await hash(SEED_ACCOUNT_PASSWORD, ARGON2_PARAMETERS)
+        : `${UNUSABLE_HASH}:${email}`,
     },
   });
 }
