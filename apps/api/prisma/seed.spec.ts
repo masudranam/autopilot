@@ -265,9 +265,34 @@ describe('the seed only writes a usable credential on a local database', () => {
     expect(admin?.passwordHash.startsWith('$argon2id$')).toBe(false);
   });
 
+  /**
+   * `?host=` beats the authority for the real driver (Cloud SQL, PgBouncer, Supabase
+   * poolers all address a database this way), so a URL that reads as loopback can
+   * connect anywhere. Verified live by the security review: an authority pointing at a
+   * dead port with `?host=…&port=…` appended connected successfully elsewhere.
+   */
+  it('refuses a loopback-looking URL whose host is overridden by a query parameter', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    process.env.DATABASE_URL =
+      'postgresql://postgres@localhost:5442/app?host=db.prod.example.com&port=6543';
+
+    await seed(prisma);
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { passwordHash: true },
+    });
+    expect(admin?.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
+  });
+
   it('writes an unusable hash when NODE_ENV is production, even on loopback', async () => {
     await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
-    process.env.DATABASE_URL = realDatabaseUrl;
+    // An explicit loopback URL, NOT `realDatabaseUrl`. In CI that variable is undefined
+    // — Turbo strips it — and assigning it here set the literal string "undefined",
+    // which the guard rejects as unparseable. The test then passed without NODE_ENV
+    // mattering at all: deleting the production check left it green. Pinning a URL that
+    // is definitely permitted is what makes NODE_ENV the only thing under test.
+    process.env.DATABASE_URL = 'postgresql://postgres@localhost:5442/probe?schema=public';
     const realNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
 

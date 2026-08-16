@@ -37,6 +37,22 @@ tested versus what the diff actually contains.
 
 ## 3 · Read the gate result — do not re-run it
 
+**First, prove the CI result belongs to the commit you are reviewing.** `gh pr checks` reports
+GitHub's _recorded_ PR head, which can lag the branch — a push may land while the pull_request event
+does not, and then those green checks belong to the previous commit:
+
+```
+git rev-parse HEAD
+gh pr view <n> --json headRefOid --jq .headRefOid
+gh api repos/:owner/:repo/commits/$(git rev-parse HEAD)/check-runs --jq .total_count
+```
+
+All three must agree, and the check-run count must be non-zero. If they disagree, or the count is 0,
+CI has **not run on this code** — that is `BLOCKED`, not a pass. This has already happened once and
+a reviewer was handed a false green.
+
+Then, and only then:
+
 ```
 gh pr checks <n>
 ```
