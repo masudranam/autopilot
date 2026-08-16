@@ -47,6 +47,10 @@ even if nothing in this repo reads it.
 
 ## When it drifts
 
-`contract-auditor` runs on every PR touching `schema.prisma`, `packages/contracts` or an app's data
-layer. It looks for: types redeclared in apps, enums hand-copied from Prisma, response shapes the
-schema does not describe, and optional/required mismatches between schema and usage.
+`pr-reviewer` checks this as part of its I2 pass on any PR touching `schema.prisma`,
+`packages/contracts` or an app's data layer. It looks for: types redeclared in apps, enums
+hand-copied from Prisma, response shapes the schema does not describe, and optional/required
+mismatches between schema and usage.
+
+The `guard-write` hook blocks the most common case at the source — a `*Response` / `*Dto` /
+`*Request` type declared inside `apps/*` is rejected before the file is written.

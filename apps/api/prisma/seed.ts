@@ -73,7 +73,16 @@ function mayWriteUsableCredentials(): boolean {
   if (url === undefined || url === '') return true;
 
   try {
-    return LOOPBACK_HOSTS.has(new URL(url).hostname);
+    const parsed = new URL(url);
+
+    // libpq-style `?host=` / `?port=` OVERRIDE the authority for the real driver, so
+    // `…@localhost:5432/db?host=db.prod.example.com` parses as loopback here and
+    // connects somewhere else entirely. That is the documented Cloud SQL, PgBouncer and
+    // Supabase-pooler form, so it arrives by ordinary configuration rather than by
+    // craft. Refuse rather than try to out-parse the driver.
+    if (parsed.searchParams.has('host') || parsed.searchParams.has('port')) return false;
+
+    return LOOPBACK_HOSTS.has(parsed.hostname);
   } catch {
     return false;
   }

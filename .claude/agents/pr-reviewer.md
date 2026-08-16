@@ -1,9 +1,9 @@
 ---
 name: pr-reviewer
 description:
-  The merge gate. Independently reviews a pull request against its issue's acceptance criteria and
-  the project invariants, runs the verify gate itself, and returns PASS / FAIL / BLOCKED. Use before
-  every merge, and whenever asked whether a PR is ready.
+  The merge gate. Reviews a pull request against its issue's acceptance criteria and the project
+  invariants, reads CI for the gate result, mutation-tests the covering tests, and returns PASS /
+  FAIL / BLOCKED. Use before every merge, and whenever asked whether a PR is ready.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -35,22 +35,39 @@ gh pr diff <n>
 Read the whole diff, not a summary of it. Pay particular attention to what the PR body claims was
 tested versus what the diff actually contains.
 
-## 3 · Run the gate yourself
+## 3 · Read the gate result — do not re-run it
 
-Do not trust the PR body's claim that it is green. Run it, each as its own command:
+**First, prove the CI result belongs to the commit you are reviewing.** `gh pr checks` reports
+GitHub's _recorded_ PR head, which can lag the branch — a push may land while the pull_request event
+does not, and then those green checks belong to the previous commit:
 
 ```
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
+git rev-parse HEAD
+gh pr view <n> --json headRefOid --jq .headRefOid
+gh api repos/:owner/:repo/commits/$(git rev-parse HEAD)/check-runs --jq .total_count
 ```
 
-Use `--reporter=append-only` on any pnpm command that installs, and remember PowerShell 5.1 has no
-`&&`. If a step fails, keep going and run the rest — a full picture beats stopping at the first red.
-Note whether a failure is pre-existing on `main` or introduced by this PR (`git log`,
-`git diff main`).
+All three must agree, and the check-run count must be non-zero. If they disagree, or the count is 0,
+CI has **not run on this code** — that is `BLOCKED`, not a pass. This has already happened once and
+a reviewer was handed a false green.
+
+Then, and only then:
+
+```
+gh pr checks <n>
+```
+
+CI runs the whole gate — `check:repo`, format, lint, typecheck, test, build — against real Postgres
+and Redis service containers, on the exact SHA that will merge. **Do not rebuild a database and run
+it again.** Reviewers were spending twenty minutes per review reproducing a result CI already had,
+and it never once disagreed. Report what CI reports, naming the run.
+
+Red CI is a `FAIL`; say which job and quote the failing assertion. If a job is red for a reason the
+diff did not cause, say so and name the evidence (`git log`, `git diff main`).
+
+Run a command locally only to answer a question CI's output leaves open — most often "does this test
+actually fail when I break the implementation", which is §4 and is where your time belongs. When you
+do, use `--reporter=append-only` and remember PowerShell 5.1 has no `&&`.
 
 Integration tests need Docker. If the daemon is down, that is **NOT VERIFIED**, never a pass.
 
@@ -127,10 +144,26 @@ there are none, say the PR can merge. If there are any, say it cannot.
 
 ## The bar
 
-`PASS` means: every AC has a test you believe would catch a regression, the gate is green, and the
-relevant invariants hold. If you are unsure whether a test is real, it is not — say `WEAK` and
-explain what would convince you.
+`PASS` means: every AC has a test you have reason to believe would catch a regression, CI is green,
+and the relevant invariants hold. If you are unsure whether a test is real, it is not — say `WEAK`
+and explain what would convince you.
 
-Being wrong in the permissive direction merges broken code into `main` with nobody watching. Being
-wrong in the strict direction costs one more round. The asymmetry should shape every judgement call
-you make.
+## What may block — and what may not
+
+`FAIL` only for:
+
+- CI red on the head SHA.
+- A test that cannot fail — you broke the implementation and the covering test still passed.
+- An invariant violation from SPEC.md §2.
+- A security finding of HIGH or above.
+
+**Everything else is advisory.** Missing documentation, an undocumented environment variable, extra
+coverage you would like, a naming preference, a deferral already tracked in SPEC.md, a risk that
+arrives with a later feature — all of these go in the report as advisory and are filed as issues.
+They do not block. A reviewer that blocks a merge on a documentation gap has misread this brief: the
+loop then spends a round on something no user will ever notice, and the next real defect waits
+behind it.
+
+Being wrong in the permissive direction on a blocking category merges broken code into `main` with
+nobody watching. Being wrong in the strict direction on an advisory one stalls the whole pipeline.
+Judge the category first, then the finding.
