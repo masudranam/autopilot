@@ -5,6 +5,7 @@ import {
   ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Public } from '../../common/auth/public.decorator';
 import { NotReadyError } from '../../common/errors/domain-error';
 import { HealthService } from './health.service';
 
@@ -24,6 +25,7 @@ import { HealthService } from './health.service';
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 
+  @Public()
   @Get()
   @ApiOperation({ summary: 'Liveness — 200 whenever the process is running' })
   @ApiOkResponse({ description: 'The process is up.' })
@@ -31,6 +33,7 @@ export class HealthController {
     return { status: 'ok' };
   }
 
+  @Public()
   @Get('ready')
   @ApiOperation({ summary: 'Readiness — 200 only when Postgres and Redis both answer' })
   @ApiOkResponse({ description: 'All dependencies reachable.' })

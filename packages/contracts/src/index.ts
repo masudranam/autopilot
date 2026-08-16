@@ -4,6 +4,7 @@
  * Apps import inferred types from here and never redeclare a payload. See
  * docs/adr/0002-contracts-first-with-zod.md and invariant I2 in SPEC.md.
  */
+export * from './auth';
 export * from './money';
 export * from './pagination';
 export * from './problem-details';
