@@ -1,6 +1,7 @@
 import { type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
 import { validateEnv, type Env } from './config/env';
@@ -38,6 +39,12 @@ export function configureApp(app: INestApplication, env: Env): void {
   app.use(express.json({ limit: BODY_LIMIT }));
   app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
 
+  // 3. Cookies. Express 5 does not populate `req.cookies` on its own, and F8's refresh
+  //    token arrives in one. Deliberately UNSIGNED: the value is 256 bits of CSPRNG
+  //    output whose hash is looked up in the database, so a signature would add a
+  //    second secret to rotate and prove nothing the lookup does not already prove.
+  app.use(cookieParser());
+
   app.setGlobalPrefix(env.API_PREFIX);
 
   // Framework fingerprinting hygiene, flagged by security-auditor on #64. Full
@@ -52,12 +59,30 @@ export function configureApp(app: INestApplication, env: Env): void {
   app.useGlobalFilters(new ProblemDetailsFilter(env.suppressInternalErrors));
 
   // OpenAPI at /api/docs (F4/AC4) — outside the versioned prefix on purpose: the
-  // docs describe versions, they are not part of one. Gating for production is
-  // tracked as #66, due with the first authenticated route (F8).
-  const openapi = new DocumentBuilder()
-    .setTitle('Agentic Shop API')
-    .setDescription('Modular-monolith ecommerce API. Errors are RFC 9457 Problem Details.')
-    .setVersion('1')
-    .build();
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, openapi));
+  // docs describe versions, they are not part of one.
+  //
+  // Gated since #66. The document is not merely documentation once authenticated
+  // routes exist: it is a machine-readable index of every path, parameter and payload
+  // shape, handed to anonymous callers, and `/api/docs-json` feeds straight into a
+  // scanner. The decision is NOT taken here — `env.docsEnabled` is derived in the
+  // validated config service (rules/10-backend.md: process.env is read in one place) —
+  // and it fails closed, so an unconfigured deploy serves nothing.
+  //
+  // Gated by not calling `setup()` at all rather than by a guard in front of it: an
+  // unmounted route cannot be reached by a path-normalisation trick, and there is no
+  // second code path where the document is built and then withheld.
+  if (env.docsEnabled) {
+    const openapi = new DocumentBuilder()
+      .setTitle('Agentic Shop API')
+      .setDescription('Modular-monolith ecommerce API. Errors are RFC 9457 Problem Details.')
+      .setVersion('1')
+      .addBearerAuth({
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Access token from POST /auth/login (15 minutes, F8).',
+      })
+      .build();
+    SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, openapi));
+  }
 }

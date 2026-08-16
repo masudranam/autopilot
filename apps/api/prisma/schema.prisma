@@ -165,6 +165,14 @@ model Session {
   ip               String?
   lastUsedAt       DateTime  @default(now()) @map("last_used_at")
   expiresAt        DateTime  @map("expires_at")
+  // Set the moment this token is exchanged for its successor. It is BOTH the used-flag
+  // that makes rotation atomic — the update is conditional on it still being null, so
+  // two parallel refreshes cannot both win (rules/30-prisma.md) — and the evidence that
+  // makes reuse detectable: a presented token whose row is already rotated is a token
+  // someone kept a copy of, so the whole family is revoked (F8/AC3). The row therefore
+  // outlives its usefulness on purpose; deleting it on rotation would turn a stolen
+  // token into an ordinary "unknown token" 401 and the theft would go unnoticed.
+  rotatedAt        DateTime? @map("rotated_at")
   revokedAt        DateTime? @map("revoked_at")
 
   createdAt DateTime @default(now()) @map("created_at")

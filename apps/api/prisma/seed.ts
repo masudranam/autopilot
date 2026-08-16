@@ -6,16 +6,29 @@
  * including every updatedAt — is byte-identical, which is what the seed.spec asserts.
  * Content is fully deterministic: no randomness, no wall-clock-dependent values.
  *
- * The accounts get placeholder password hashes with a prefix no verifier will ever
- * match. Real Argon2id hashing arrives with the auth module (F7), which re-seeds
- * these two accounts with real hashes. Documented here so nobody mistakes the
- * placeholder for a weakly-hashed password.
+ * Since F8 the two demo accounts carry REAL Argon2id hashes of a documented
+ * development password, because `POST /auth/login` now exists and a demo account
+ * nobody can sign in to is not a demo account. The password is deliberately long,
+ * obviously non-production, and only ever hashed into a database that a developer
+ * seeded on purpose — the seed never runs against a production database, and the two
+ * addresses are on the reserved `.test` TLD.
+ *
+ * The hash is written ONLY when the account is created. Re-hashing on every run would
+ * produce a new salt each time and break I8: the second run must change nothing.
  */
 import 'dotenv/config';
+import { hash } from '@node-rs/argon2';
+import { ARGON2_PARAMETERS } from '../src/modules/auth/password/argon2-parameters';
 import { createPrismaClient } from '../src/db/client';
 import type { PrismaClient } from '../src/db/client';
 
-const PLACEHOLDER_HASH_PREFIX = 'SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:';
+/**
+ * The development password for both seeded accounts.
+ *
+ * Exported so the seed spec asserts against this exact value rather than a copy that
+ * can drift — and so `pnpm dev` users have one place to read it from.
+ */
+export const SEED_ACCOUNT_PASSWORD = 'seed-development-password-not-for-production';
 
 /** Deterministic round-robin pick — total, so noUncheckedIndexedAccess stays honest. */
 function cycle<T>(items: readonly T[], index: number): T {
@@ -148,7 +161,10 @@ async function ensureUser(
       role,
       firstName,
       lastName,
-      passwordHash: `${PLACEHOLDER_HASH_PREFIX}${email}`,
+      // Hashed here rather than pasted as a constant: a literal hash would pin one
+      // salt into the repository and would silently stop matching the day the cost
+      // parameters change.
+      passwordHash: await hash(SEED_ACCOUNT_PASSWORD, ARGON2_PARAMETERS),
     },
   });
 }

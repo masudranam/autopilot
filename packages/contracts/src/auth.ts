@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Identity contracts (SPEC.md F7 — registration).
+ * Identity contracts (SPEC.md F7 — registration, F8 — login and tokens).
  *
  * The only declaration of these shapes; apps import the inferred types (I2, ADR-0002).
- * Login, tokens and sessions are F8/F9 and are deliberately absent here.
+ * Session listing and logout are F9 and are deliberately absent here.
  */
 
 /** Minimum password length (F7/AC2). Exported so a client can state the rule up front. */
@@ -99,3 +99,104 @@ export const registeredUserSchema = z.object({
 });
 
 export type RegisteredUser = z.infer<typeof registeredUserSchema>;
+
+// ------------------------------------------------------------------ F8 · login & tokens
+
+/**
+ * A password as offered at LOGIN — shape only, and deliberately NOT `passwordSchema`.
+ *
+ * Reusing the registration schema here would reject a submitted credential for being
+ * short or over-long with a 422 that names the password field, which tells an attacker
+ * "this cannot be anyone's password" before a single hash is computed, and gives the
+ * two failure modes (bad shape → 422, bad credential → 401) different costs. Login has
+ * exactly one client-visible failure — 401 — and everything that gets that far pays the
+ * same Argon2id verify (F8/AC4).
+ *
+ * The upper bound is kept because an unbounded input still has to be hashed, and it is
+ * the same bound registration applies, so no real credential can be excluded by it.
+ */
+export const loginPasswordSchema = z
+  .string()
+  .min(1, 'Must not be empty')
+  .max(PASSWORD_MAX_LENGTH, `Must be at most ${PASSWORD_MAX_LENGTH} characters`);
+
+/** `strictObject` for the same reason registration uses it — see above. */
+export const loginRequestSchema = z.strictObject({
+  email: emailSchema,
+  password: loginPasswordSchema,
+});
+
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+/**
+ * Access token lifetime in seconds — F8/AC5 says fifteen minutes, so it is written
+ * once, here, and both the signer and the client read it from this constant.
+ */
+export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+
+/** Refresh token lifetime — SPEC.md §6.4 ("refresh token (30 d, rotating…)"). */
+export const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * The cookie the refresh token travels in (F8/AC1).
+ *
+ * The refresh token is NEVER in a response body: a body is readable by script, ends up
+ * in logs and proxy caches, and gets stored in `localStorage` by well-meaning clients.
+ * The cookie is httpOnly, secure and sameSite=strict, which is the whole point.
+ */
+export const REFRESH_COOKIE_NAME = 'refresh_token';
+
+/** 256 bits of CSPRNG output — the refresh token is opaque, not a JWT. */
+export const REFRESH_TOKEN_BYTES = 32;
+
+/**
+ * The wire form of a refresh token: base64url, unpadded, of `REFRESH_TOKEN_BYTES`.
+ *
+ * Declared as a schema rather than trusted because a cookie is caller-controlled input
+ * like any other, and this is the only input `POST /auth/refresh` reads (I2).
+ */
+export const refreshTokenSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
+  .length(Math.ceil((REFRESH_TOKEN_BYTES * 4) / 3), 'Wrong length');
+
+/**
+ * What login and refresh return.
+ *
+ * No refresh token — that is the cookie's job — and no user object: the storefront
+ * reads the profile from `/me` (F12) rather than from a second, drift-prone copy
+ * embedded in every token response.
+ */
+export const authTokensSchema = z.object({
+  accessToken: z.string().min(1),
+  tokenType: z.literal('Bearer'),
+  /** Seconds, matching OAuth 2 §5.1 so a client does not have to decode the JWT. */
+  expiresIn: z.int().positive(),
+});
+
+export type AuthTokens = z.infer<typeof authTokensSchema>;
+
+export const ACCESS_TOKEN_ISSUER = 'agentic-shop';
+export const ACCESS_TOKEN_AUDIENCE = 'agentic-shop-api';
+
+/**
+ * The verified claims of an access token.
+ *
+ * A JWT payload is a wire shape — the storefront decodes `exp` to refresh proactively —
+ * so it is declared here and nowhere else. `sid` binds the access token to the session
+ * that minted it, which is what lets F9 revoke an access token's lineage.
+ *
+ * No `role` claim yet: roles are a Prisma enum, and rules/20-contracts.md §3 forbids
+ * hand-writing a union that mirrors one. It arrives with the generated enum in F10.
+ */
+export const accessTokenClaimsSchema = z.object({
+  sub: z.uuid(),
+  sid: z.uuid(),
+  iss: z.literal(ACCESS_TOKEN_ISSUER),
+  aud: z.literal(ACCESS_TOKEN_AUDIENCE),
+  /** Seconds since the epoch, as RFC 7519 requires — not milliseconds. */
+  iat: z.int().positive(),
+  exp: z.int().positive(),
+});
+
+export type AccessTokenClaims = z.infer<typeof accessTokenClaimsSchema>;

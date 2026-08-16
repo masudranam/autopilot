@@ -6,8 +6,9 @@
  * and seeded once before jest starts; the idempotency test then re-runs the seed
  * in-process and asserts the state fingerprint did not change at all.
  */
+import { verify } from '@node-rs/argon2';
 import { createPrismaClient, type PrismaClient } from '../src/db/client';
-import { seed } from './seed';
+import { seed, SEED_ACCOUNT_PASSWORD } from './seed';
 
 let prisma: PrismaClient;
 
@@ -162,7 +163,15 @@ describe('the catalogue is browsable (AC4)', () => {
     expect(await prisma.user.count({ where: { role: 'CUSTOMER' } })).toBeGreaterThanOrEqual(1);
   });
 
-  it('seeded accounts carry unverifiable placeholder hashes, not real-looking ones', async () => {
+  /**
+   * Since F8 the demo accounts are genuinely signable-in.
+   *
+   * The password is asserted through the library's own `verify` — the only proof that
+   * what is stored is a usable credential rather than a plausible-looking string — and
+   * the hash is checked to be Argon2id at the ADR-0009 cost, so a seed that quietly
+   * wrote a cheaper hash fails here.
+   */
+  it('seeded accounts carry real Argon2id hashes of the documented dev password', async () => {
     const users = await prisma.user.findMany({
       where: { email: { endsWith: SEED_EMAIL_DOMAIN } },
       select: { email: true, passwordHash: true },
@@ -173,7 +182,12 @@ describe('the catalogue is browsable (AC4)', () => {
     expect(users.map((user) => user.email)).toEqual(SEEDED_EMAILS);
 
     for (const user of users) {
-      expect(user.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
+      expect(user.passwordHash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
+      await expect(verify(user.passwordHash, SEED_ACCOUNT_PASSWORD)).resolves.toBe(true);
+      await expect(verify(user.passwordHash, `${SEED_ACCOUNT_PASSWORD}x`)).resolves.toBe(false);
     }
+
+    // Salted per account: two demo users sharing one password must not share a hash.
+    expect(new Set(users.map((user) => user.passwordHash)).size).toBe(users.length);
   });
 });

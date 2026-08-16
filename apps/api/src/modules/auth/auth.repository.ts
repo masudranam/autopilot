@@ -23,6 +23,38 @@ export interface UserRow {
   createdAt: Date;
 }
 
+/** The minimum login needs: who this is, and what to verify against. */
+export interface CredentialRow {
+  id: string;
+  passwordHash: string;
+}
+
+/** Where a session was created from — F9 lists these back to the account owner. */
+export interface SessionOrigin {
+  device: string | null;
+  ip: string | null;
+}
+
+/** A session row as the service refers to it after a login or a rotation. */
+export interface SessionRow {
+  id: string;
+  userId: string;
+  family: string;
+}
+
+/**
+ * What happened when a refresh token was presented (F8/AC2, AC3).
+ *
+ * `reused` is the interesting one: the token exists and was already exchanged, which
+ * means two parties hold it and one of them should not. The repository reports the
+ * fact; deciding that the fact means "revoke the whole family" is the service's rule.
+ */
+export type RotationOutcome =
+  | { outcome: 'rotated'; session: SessionRow }
+  | { outcome: 'reused'; family: string; userId: string }
+  | { outcome: 'rejected' }
+  | { outcome: 'unknown' };
+
 /**
  * Why an outcome rather than an exception: knowing that Postgres error 23505 arrives
  * as Prisma `P2002` is repository knowledge, and deciding that a taken email is a 409
@@ -39,6 +71,9 @@ const USER_PROJECTION = {
   lastName: true,
   createdAt: true,
 } as const;
+
+/** Never selects `refreshTokenHash` — a hash that is not read cannot be logged. */
+const SESSION_PROJECTION = { id: true, userId: true, family: true } as const;
 
 @Injectable()
 export class AuthRepository {
@@ -72,6 +107,132 @@ export class AuthRepository {
       if (isEmailUniqueViolation(error)) return { created: false };
       throw error;
     }
+  }
+
+  /**
+   * The one lookup login needs, by canonicalised email.
+   *
+   * Selects the hash and nothing else beyond the id: a projection that cannot carry a
+   * name or a role into a place that has not authenticated anybody yet. Registration
+   * still has no way to call this — its own criterion (F7/AC3) is that the unique index
+   * decides uniqueness, and its unit test asserts the exact call sequence.
+   */
+  async findCredentialsByEmail(email: string): Promise<CredentialRow | null> {
+    return this.prisma.client.user.findUnique({
+      where: { email },
+      select: { id: true, passwordHash: true },
+    });
+  }
+
+  /** Opens a new session family — one row, one login (F8/AC1). */
+  async createSession(input: {
+    userId: string;
+    family: string;
+    refreshTokenHash: string;
+    expiresAt: Date;
+    origin: SessionOrigin;
+  }): Promise<SessionRow> {
+    return this.prisma.client.session.create({
+      data: {
+        userId: input.userId,
+        family: input.family,
+        refreshTokenHash: input.refreshTokenHash,
+        expiresAt: input.expiresAt,
+        device: input.origin.device,
+        ip: input.origin.ip,
+      },
+      select: SESSION_PROJECTION,
+    });
+  }
+
+  /**
+   * Exchanges a presented refresh token for its successor, atomically (F8/AC2).
+   *
+   * The whole exchange is one transaction, and the claim itself is a CONDITIONAL update
+   * — `rotatedAt: null` is in the WHERE clause, not in an `if` above it. That is what
+   * makes two simultaneous refreshes with the same token resolve to exactly one winner:
+   * the second UPDATE blocks on the first's row lock, re-evaluates its WHERE after the
+   * commit, matches nothing and reports `count: 0`. A read-then-write version passes
+   * every sequential test and issues two live tokens under a real race.
+   *
+   * The pre-read exists to CLASSIFY a failure (unknown / reused / expired), never to
+   * decide whether the claim succeeds — that decision is `count` and only `count`. A
+   * loser of the race is reported as `reused`, which is the truthful reading: two
+   * requests presented the same single-use token.
+   */
+  async rotateSession(input: {
+    presentedHash: string;
+    next: { refreshTokenHash: string; expiresAt: Date; origin: SessionOrigin };
+    now?: Date;
+  }): Promise<RotationOutcome> {
+    const now = input.now ?? new Date();
+
+    return this.prisma.client.$transaction(async (tx): Promise<RotationOutcome> => {
+      const presented = await tx.session.findUnique({
+        where: { refreshTokenHash: input.presentedHash },
+        select: {
+          id: true,
+          userId: true,
+          family: true,
+          rotatedAt: true,
+          revokedAt: true,
+          expiresAt: true,
+        },
+      });
+
+      // No such token was ever issued — or it belongs to a database that is not this
+      // one. Nothing to revoke, and no family to blame.
+      if (!presented) return { outcome: 'unknown' };
+
+      if (presented.rotatedAt !== null) {
+        return { outcome: 'reused', family: presented.family, userId: presented.userId };
+      }
+
+      if (presented.revokedAt !== null || presented.expiresAt <= now) {
+        return { outcome: 'rejected' };
+      }
+
+      const claimed = await tx.session.updateMany({
+        where: { id: presented.id, rotatedAt: null, revokedAt: null },
+        data: { rotatedAt: now, lastUsedAt: now },
+      });
+
+      if (claimed.count === 0) {
+        // Someone claimed this token between the read above and this update. That is
+        // the race, and by definition the token was presented twice.
+        return { outcome: 'reused', family: presented.family, userId: presented.userId };
+      }
+
+      const successor = await tx.session.create({
+        data: {
+          userId: presented.userId,
+          family: presented.family,
+          refreshTokenHash: input.next.refreshTokenHash,
+          expiresAt: input.next.expiresAt,
+          device: input.next.origin.device,
+          ip: input.next.origin.ip,
+        },
+        select: SESSION_PROJECTION,
+      });
+
+      return { outcome: 'rotated', session: successor };
+    });
+  }
+
+  /**
+   * Kills every session in a lineage (F8/AC3).
+   *
+   * `revokedAt: null` in the WHERE keeps the original revocation timestamp when this is
+   * called twice — which it will be, because a stolen token gets presented repeatedly.
+   * Returns the number of sessions actually revoked, so the caller can log the blast
+   * radius of a detected theft.
+   */
+  async revokeFamily(family: string, now: Date = new Date()): Promise<number> {
+    const revoked = await this.prisma.client.session.updateMany({
+      where: { family, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    return revoked.count;
   }
 }
 
