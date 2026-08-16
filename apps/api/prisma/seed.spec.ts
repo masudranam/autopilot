@@ -207,10 +207,43 @@ describe('the catalogue is browsable (AC4)', () => {
 describe('the seed only writes a usable credential on a local database', () => {
   const realDatabaseUrl = process.env.DATABASE_URL;
 
+  /** Assigning `undefined` would set the literal string "undefined". */
+  function restoreDatabaseUrl(): void {
+    if (realDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = realDatabaseUrl;
+  }
+
   afterAll(async () => {
-    process.env.DATABASE_URL = realDatabaseUrl;
+    restoreDatabaseUrl();
     await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
     await seed(prisma);
+  });
+
+  /**
+   * The regression this guard shipped with, caught by CI rather than by a test.
+   *
+   * `turbo.json` does not list `DATABASE_URL` in `globalEnv`, and Turbo 2 defaults to
+   * `envMode: strict`, so the variable is stripped from the test task — absent is the
+   * NORMAL case in CI, not a warning sign. The first version of the guard treated
+   * absent as hostile and wrote an unusable hash, which failed the Argon2id assertion
+   * above. Absent means the client falls back to its hard-coded loopback URL, so this
+   * asserts the guard reads it that way.
+   */
+  it('still writes a usable hash when DATABASE_URL is absent, as it is in CI', async () => {
+    await prisma.user.deleteMany({ where: { email: { in: SEEDED_EMAILS } } });
+    delete process.env.DATABASE_URL;
+
+    try {
+      await seed(prisma);
+    } finally {
+      restoreDatabaseUrl();
+    }
+
+    const admin = await prisma.user.findUnique({
+      where: { email: 'admin@agentic-shop.test' },
+      select: { passwordHash: true },
+    });
+    expect(admin?.passwordHash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
   });
 
   it('writes an unusable hash when DATABASE_URL names a remote host', async () => {

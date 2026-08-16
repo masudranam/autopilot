@@ -48,10 +48,19 @@ const UNUSABLE_HASH = 'SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH';
  * throwaway local database — anywhere else it is a published administrator credential,
  * which is an authentication bypass rather than a convenience.
  *
- * Fails closed: an unparseable or absent `DATABASE_URL` yields `false`, and so does an
+ * Resolves the target the same way `src/db/client.ts` does, and that detail is
+ * load-bearing: an ABSENT `DATABASE_URL` means the client falls back to its hard-coded
+ * loopback compose URL, so absent is loopback rather than unknown. Treating absent as
+ * hostile looks safer and is simply wrong — `turbo.json` sets `globalEnv` without
+ * `DATABASE_URL` and Turbo 2 defaults to `envMode: strict`, so the variable is stripped
+ * from the test task and absent is the NORMAL case in CI. That mistake reached CI once;
+ * it is written down so it does not again.
+ *
+ * Still fails closed where it counts: an unparseable URL, any non-loopback host, and an
  * explicit production `NODE_ENV` even on loopback. Same guard and the same known limit
  * as `scripts/db-reset.mjs`: a tunnel to a remote database lands on 127.0.0.1 and would
- * pass, so this stops an accident, not a determined operator.
+ * pass, so this stops an accident, not a determined operator. Reaching a real
+ * production database requires `DATABASE_URL` to name it, and that is the case checked.
  *
  * The catalogue still seeds everywhere — F3/AC4 asks for something browsable, and that
  * requirement is what makes people run this on demo boxes in the first place. Only the
@@ -60,8 +69,11 @@ const UNUSABLE_HASH = 'SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH';
 function mayWriteUsableCredentials(): boolean {
   if (process.env.NODE_ENV === 'production') return false;
 
+  const url = process.env.DATABASE_URL;
+  if (url === undefined || url === '') return true;
+
   try {
-    return LOOPBACK_HOSTS.has(new URL(process.env.DATABASE_URL ?? '').hostname);
+    return LOOPBACK_HOSTS.has(new URL(url).hostname);
   } catch {
     return false;
   }
