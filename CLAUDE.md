@@ -9,8 +9,10 @@ the system fits together. Amend the spec in the same PR whenever reality diverge
 ## Rules
 
 @.claude/rules/00-workflow.md @.claude/rules/10-backend.md @.claude/rules/20-contracts.md
-@.claude/rules/30-prisma.md @.claude/rules/40-frontend.md @.claude/rules/50-testing.md
-@.claude/rules/60-security.md
+@.claude/rules/30-prisma.md @.claude/rules/50-testing.md @.claude/rules/60-security.md
+
+`40-frontend.md` is not imported here: it carries `paths:` frontmatter and loads only when a
+storefront or admin file is in play, which is nothing until E2. Import it above if that changes.
 
 ## The three rules that override everything
 
@@ -77,18 +79,4 @@ pnpm db:seed                          # idempotent seed
 pnpm db:reset                         # drop, migrate, seed from empty
 pnpm dev                              # api + storefront + admin
 pnpm verify                           # the gate
-```
-
-## Layout
-
-```
-apps/api            NestJS modular monolith — see .claude/rules/10-backend.md
-apps/storefront     Next.js customer app
-apps/admin          Next.js operator app
-packages/contracts  Zod schemas — the ONLY place API shapes are declared
-packages/ui         shared React components
-packages/config     eslint · tsconfig · prettier bases
-infra/              docker-compose
-e2e/                Playwright
-.claude/            this harness
 ```

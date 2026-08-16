@@ -13,15 +13,23 @@ cannot fail actively removes that signal, so it is worse than no test at all.
 
 ## What every feature must have
 
-1. **One test per acceptance criterion**, and the test must fail if the behaviour regresses.
-2. **Cross-account probes** on every verb of every owned resource, asserting `404` and not `403`
-   (I4). `GET`, `PATCH`, `PUT` and `DELETE` — not just `GET`.
-3. **A query-count test** for every new list or detail endpoint, locking in the absence of N+1.
-4. **A genuinely parallel test** for anything concurrency-sensitive — stock reservation, coupon
-   redemption limits, idempotent placement. Fire the requests with `Promise.all`. A sequential loop
-   passes even when the race is present, which makes it worse than useless.
-5. **Failure paths**, not just success: declined payment, expired token, revoked session, expired
-   reservation, invalid coupon.
+1. **One test per acceptance criterion**, and the test must fail if the behaviour regresses. This
+   one is not negotiable — it is the whole reason the gate means anything.
+2. **Cross-account probes** — only when the feature actually adds an owned resource, and then on the
+   verbs it adds, asserting `404` and not `403` (I4). A feature that adds no owned resource says so
+   in the test file rather than inventing a probe.
+3. **A query-count test** on new **list** endpoints, locking in the absence of N+1. Detail and write
+   endpoints do not need one unless the criterion is about statement count.
+4. **A genuinely parallel test** where a race would corrupt state or money — stock reservation,
+   coupon redemption limits, idempotent placement, token rotation. Fire the requests with
+   `Promise.all`. A sequential loop passes even when the race is present, which makes it worse than
+   useless. Not required elsewhere.
+5. **The failure paths named by an acceptance criterion.** Blanket coverage of every error branch is
+   not required; a criterion that says "expired token returns 401" needs its test, an unmentioned
+   branch does not.
+
+Anything beyond this list is welcome but is **never** a reason to block a merge. If a reviewer wants
+more coverage, it files an issue.
 
 ## Tests that do not count
 
