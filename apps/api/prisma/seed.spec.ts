@@ -11,6 +11,25 @@ import { seed } from './seed';
 
 let prisma: PrismaClient;
 
+/**
+ * The seed's own accounts, and the scope of every assertion this file makes about
+ * `users`.
+ *
+ * `users` stopped being a table only the seed writes to when F7 landed: the
+ * registration e2e suite creates real accounts, with real Argon2id hashes, in a
+ * PARALLEL jest worker against this same database. An unscoped `user.findMany()` here
+ * therefore reads whatever that suite happens to have in flight, which made both the
+ * idempotency fingerprint and the placeholder-hash assertion fail at random — roughly
+ * one full-suite run in seven, and every run when the two files are scheduled together.
+ *
+ * Scoping to the seed's domain is not a weakening: every assertion below states what
+ * the SEED produces, and `SEEDED_EMAILS` pins the exact set, so the filter cannot
+ * silently start matching nothing or quietly tolerate an extra seeded account.
+ */
+const SEED_EMAIL_DOMAIN = '@agentic-shop.test';
+
+const SEEDED_EMAILS = ['admin@agentic-shop.test', 'customer@agentic-shop.test'];
+
 beforeAll(() => {
   prisma = createPrismaClient();
 });
@@ -37,7 +56,12 @@ async function fingerprint() {
     priceLists,
     prices,
   ] = await Promise.all([
-    prisma.user.findMany({ orderBy: { email: 'asc' } }),
+    // Scoped — see SEED_EMAIL_DOMAIN. Rows the F7 registration suite creates in a
+    // parallel worker are not the seed's output and must not enter the fingerprint.
+    prisma.user.findMany({
+      where: { email: { endsWith: SEED_EMAIL_DOMAIN } },
+      orderBy: { email: 'asc' },
+    }),
     prisma.category.findMany({ orderBy: { slug: 'asc' } }),
     prisma.brand.findMany({ orderBy: { slug: 'asc' } }),
     prisma.product.findMany({ orderBy: { slug: 'asc' } }),
@@ -139,7 +163,15 @@ describe('the catalogue is browsable (AC4)', () => {
   });
 
   it('seeded accounts carry unverifiable placeholder hashes, not real-looking ones', async () => {
-    const users = await prisma.user.findMany({ select: { passwordHash: true } });
+    const users = await prisma.user.findMany({
+      where: { email: { endsWith: SEED_EMAIL_DOMAIN } },
+      select: { email: true, passwordHash: true },
+      orderBy: { email: 'asc' },
+    });
+
+    // Asserted first, so the scoped filter cannot pass this test by matching nothing.
+    expect(users.map((user) => user.email)).toEqual(SEEDED_EMAILS);
+
     for (const user of users) {
       expect(user.passwordHash).toMatch(/^SEED_PLACEHOLDER_NOT_A_VERIFIABLE_HASH:/);
     }

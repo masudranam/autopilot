@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { EnvModule } from './config/env.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 
 /**
@@ -11,6 +12,6 @@ import { HealthModule } from './modules/health/health.module';
  * `app.use()` before the parsers instead — see app.setup.ts.
  */
 @Module({
-  imports: [EnvModule, PrismaModule, RedisModule, HealthModule],
+  imports: [EnvModule, PrismaModule, RedisModule, HealthModule, AuthModule],
 })
 export class AppModule {}
