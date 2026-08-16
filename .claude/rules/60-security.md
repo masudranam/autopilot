@@ -64,4 +64,8 @@ Per-IP and per-account limits on auth, checkout, search and password reset. A 42
 ## Review
 
 `security-auditor` runs automatically on any PR touching auth, checkout, payments, admin or a route
-definition. Its findings are blocking, not advisory.
+definition.
+
+Its **HIGH and above findings are blocking**; MEDIUM and below are advisory and get filed as issues.
+`00-workflow.md` §"What may block a merge" is the single authority on this — if these two files ever
+disagree, that one wins.
