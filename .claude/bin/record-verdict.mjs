@@ -9,7 +9,7 @@
  * be recorded by mistake. See docs/adr/0008-hook-enforced-merge-gate.md.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const VALID = new Set(['PASS', 'FAIL', 'BLOCKED']);
@@ -91,12 +91,48 @@ if (dirty) {
 const file = join(projectDir, '.claude', 'state', `review-${pr}.json`);
 mkdirSync(dirname(file), { recursive: true });
 
+/**
+ * The two-round rule, enforced rather than requested.
+ *
+ * `00-workflow.md` has said "two rounds maximum, then stop and report" since the start,
+ * and PR #75 still ran four — each round closing the previous round's findings and
+ * surfacing new ones, while nothing shipped. Prose does not stop that; a refusal does.
+ *
+ * Counts FAIL rounds only. A PASS is always recordable: the point is to stop grinding on
+ * a rejected change, not to block the merge that ends the grind. `--override-rounds` is
+ * the escape hatch, so a human can extend deliberately and leave a trace in the record.
+ */
+let priorFails = 0;
+if (existsSync(file)) {
+  try {
+    const previous = JSON.parse(readFileSync(file, 'utf8'));
+    priorFails = Number(previous.failRounds ?? 0);
+  } catch {
+    priorFails = 0;
+  }
+}
+
+const override = process.argv.includes('--override-rounds');
+if (verdict === 'FAIL' && priorFails >= 2 && !override) {
+  console.error(
+    `record-verdict: refusing a third FAIL round on PR #${pr}.\n\n` +
+      `Two rounds have already failed. 00-workflow.md says stop and report to the\n` +
+      `human at this point rather than grinding — the loop is not converging, and\n` +
+      `another round usually finds new problems instead of finishing the old ones.\n\n` +
+      `Report what is blocking and let a human decide. If they choose to continue,\n` +
+      `re-run with --override-rounds, which records the extension in the verdict file.`,
+  );
+  process.exit(1);
+}
+
 const record = {
   pr: Number(pr),
   verdict,
   summary,
   headSha,
   branch,
+  failRounds: verdict === 'FAIL' ? priorFails + 1 : priorFails,
+  ...(override ? { roundLimitOverridden: true } : {}),
   recordedAt: new Date().toISOString(),
 };
 

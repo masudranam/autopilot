@@ -1,3 +1,10 @@
+---
+paths:
+  - apps/storefront/**
+  - apps/admin/**
+  - packages/ui/**
+---
+
 # Frontend — Next.js 16
 
 Two apps, same conventions: `apps/storefront` (customers) and `apps/admin` (operators).

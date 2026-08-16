@@ -42,21 +42,24 @@ git checkout -b feat/<n>-<slug>
 
 Always branch from fresh `main`. Committing on `main` is blocked by a hook.
 
-## 4 · Implement
+## 4 · Implement and test
 
-Delegate to the right specialist — `api-engineer` for backend work, `web-engineer` for user-facing
-work, both (in sequence, API first) for a full-stack feature. Give the subagent the issue number,
-the verbatim acceptance criteria, and the rules files that apply.
+Write it directly — there are no implementation subagents. Handing the work to one costs a full
+context hand-off and a re-read of the same rules, for a feature you are already holding in mind.
 
 Contracts and migrations come before implementation. See `.claude/rules/20-contracts.md`.
 
-## 5 · Test
+Write the tests as you go, one per acceptance criterion, each one able to fail if the behaviour
+regresses. `.claude/rules/50-testing.md` lists what is required and — just as important — what is
+not. Do not add coverage beyond it out of habit.
 
-Run `test-engineer` over the result. It covers every AC, adds the tests that are always missing
-(cross-account probes on every verb, query-count tests, genuinely parallel concurrency tests), and
-hunts tests that cannot fail.
+## 5 · Push and let CI verify
 
-## 6 · Verify
+CI runs the whole gate against real Postgres and Redis on the exact SHA that will merge. Push and
+read the result rather than running `pnpm verify` locally first; the local run needs Docker and
+tells you nothing CI will not.
+
+Run the gate locally only to iterate quickly on a specific failure:
 
 ```
 pnpm verify
@@ -94,10 +97,15 @@ information-disclosure bug the reviewer was in the middle of _testing for_.
 If the tree is dirty when you did not edit anything, read the diff before doing anything else. Do
 not stage it, do not assume it is yours.
 
-Run `pr-reviewer` on the PR. Additionally:
+Run `pr-reviewer` on the PR, and add `security-auditor` **only** if the diff touches auth, checkout,
+payments, admin or a route definition. One reviewer is the default, not a shortcut.
 
-- `security-auditor` if the diff touches auth, checkout, payments, admin or any route definition.
-- `contract-auditor` if it touches `schema.prisma`, `packages/contracts` or an app's data layer.
+Tell the reviewer that CI has already run the gate on this SHA and it should read `gh pr checks`
+rather than rebuild a database to repeat it. Its budget belongs in mutation testing — breaking the
+implementation to confirm a named test goes red.
+
+Only four things may block a merge: red CI, a test that cannot fail, a SPEC.md §2 invariant
+violation, and a HIGH security finding. Everything else is advisory and gets filed as an issue.
 
 Post each verdict to the PR:
 
