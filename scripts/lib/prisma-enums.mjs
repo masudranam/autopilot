@@ -33,7 +33,14 @@ export function parseEnums(schemaText) {
   //
   // This is the matcher `apps/api/src/db/schema-invariants.spec.ts:167` already used and
   // which is immune to it; the generator should have borrowed it from the start.
-  const blockPattern = /^enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)^\}/gm;
+  // Leading whitespace is tolerated on BOTH anchors. Anchoring to a bare `^\}` traded
+  // the comment-brace bug for a narrower one: an enum that is the final block in the
+  // file with an indented closing brace matched nothing and was dropped whole, silently
+  // — `gen:enums` reported one fewer enum and `check:enums` exited 0. Found by the review
+  // of PR #91, which is the third pass over this expression; each earlier version fixed
+  // a silent drop by introducing a smaller one, so the lesson is to be permissive about
+  // layout and strict about content, which is what the per-line parsing below does.
+  const blockPattern = /^[ \t]*enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)^[ \t]*\}/gm;
 
   for (const match of schemaText.matchAll(blockPattern)) {
     const name = match[1];

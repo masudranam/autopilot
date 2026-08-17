@@ -106,6 +106,19 @@ test('a brace inside a comment does not truncate the block', () => {
   assert.deepEqual(role.values, ['CUSTOMER', 'FINANCE']);
 });
 
+test('reads an enum whose closing brace is indented, even as the last block', () => {
+  // The narrower hole that anchoring to a bare `^\}` opened: as the FINAL block in the
+  // file, an indented brace matched nothing and the whole enum was dropped with no
+  // throw — gen:enums simply reported one fewer, and check:enums exited 0.
+  const enums = parseEnums(['enum Tier {', '  BRONZE', '  GOLD', '  }'].join('\n'));
+  assert.deepEqual(enums, [{ name: 'Tier', values: ['BRONZE', 'GOLD'] }]);
+});
+
+test('reads an indented enum declaration', () => {
+  const enums = parseEnums(['  enum Tier {', '    BRONZE', '  }'].join('\n'));
+  assert.deepEqual(enums, [{ name: 'Tier', values: ['BRONZE'] }]);
+});
+
 test('stops at the enum’s own closing brace, not a later one', () => {
   const enums = parseEnums(
     ['enum A {', '  X', '}', '', 'model M {', '  id String', '}', '', 'enum B {', '  Y', '}'].join(
