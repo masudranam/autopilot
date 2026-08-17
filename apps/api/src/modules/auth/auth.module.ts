@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
+import { RolesGuard } from '../../common/auth/roles.guard';
 import { AuthController } from './auth.controller';
 import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
@@ -38,9 +39,14 @@ import { RefreshTokenService } from './tokens/refresh-token.service';
     AccessTokenService,
     RefreshTokenService,
     JwtAuthGuard,
+    RolesGuard,
     // Applies to every route in the application, not only this module's.
+    // ORDER MATTERS: Nest runs global guards in registration order, so the JWT guard
+    // attaches claims before RolesGuard reads a role from them. Swapping these makes
+    // every @Roles route a 403 for everyone, including the right role.
     { provide: APP_GUARD, useExisting: JwtAuthGuard },
+    { provide: APP_GUARD, useExisting: RolesGuard },
   ],
-  exports: [AuthService, AccessTokenService, JwtAuthGuard],
+  exports: [AuthService, AccessTokenService, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

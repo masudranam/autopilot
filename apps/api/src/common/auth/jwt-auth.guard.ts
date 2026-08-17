@@ -7,7 +7,9 @@ import {
   ACCESS_TOKEN_REJECTED,
   AccessTokenService,
 } from '../../modules/auth/tokens/access-token.service';
+import { REQUIRES_AUTH_KEY } from './authenticated.decorator';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { ROLES_KEY } from './roles.decorator';
 
 /**
  * An express request after this guard has run.
@@ -24,15 +26,21 @@ export interface RequestWithAuth extends Request {
 /**
  * Turns a bearer access token into verified claims, or a 401 (F8/AC5).
  *
- * Deliberately NOT registered as a global `APP_GUARD` here. Default-closed — a route
- * with no decorator being denied — is F10/AC3, and it needs the `@Roles()` decorator
- * and role guard to land in the same change or every future route is either public or
- * unreachable. What F8 owns is the part AC5 names: an expired or malformed token is a
- * 401 with a Problem Details body, never a 500 from an unhandled `TokenExpiredError`.
+ * Registered as a global `APP_GUARD` since F9/AC5, so the default is closed: a route
+ * with no decorator is authenticated-only rather than open. `@Public()` opts out;
+ * `@Roles()` (F10) narrows further in `RolesGuard`, which runs after this one.
  *
- * `@Public()` is honoured here already, so switching this on globally in F10 is one
- * line in a module and not a sweep through every controller — the sweep is where a
- * route gets missed.
+ * PRECEDENCE, and why it is not just `getAllAndOverride(IS_PUBLIC_KEY)` (issue #86).
+ *
+ * Reflector's `getAllAndOverride` returns the handler's value if present, else the
+ * class's. Asking only about `@Public()` means a class-level `@Public()` makes every
+ * handler in that controller public — including one the author marked
+ * `@Authenticated()` or `@Roles()`, because those keys were never consulted. The route
+ * ships open while the I5 sweep, which reads handler metadata, reports it as decided.
+ *
+ * So the question asked here is "what is the NEAREST authorisation decision", across
+ * all three markers: a handler-level decision beats a class-level one whatever kind it
+ * is, and only a public decision at that level opens the route.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -42,13 +50,7 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
-    // Handler first, then controller: a `@Public()` route inside an otherwise-protected
-    // controller is a decision, and getAllAndOverride is what respects it.
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (isPublic === true) return true;
+    if (this.isPublic(context)) return true;
 
     const request = context.switchToHttp().getRequest<RequestWithAuth>();
     const token = bearerTokenOf(request.headers.authorization);
@@ -60,6 +62,32 @@ export class JwtAuthGuard implements CanActivate {
 
     request.auth = this.accessTokens.verify(token);
     return true;
+  }
+
+  /**
+   * Is the NEAREST authorisation decision "public"?
+   *
+   * Checks the handler's three markers first and returns as soon as any is present, so
+   * `@Authenticated()` or `@Roles()` on a handler overrides a class-level `@Public()`
+   * rather than being invisible to it. Only if the handler declares nothing does the
+   * class's decision apply.
+   */
+  private isPublic(context: ExecutionContext): boolean {
+    for (const target of [context.getHandler(), context.getClass()]) {
+      const isPublic = this.reflector.get<boolean | undefined>(IS_PUBLIC_KEY, target) === true;
+      const requiresAuth =
+        this.reflector.get<boolean | undefined>(REQUIRES_AUTH_KEY, target) === true;
+      const roles = this.reflector.get<unknown[] | undefined>(ROLES_KEY, target);
+      const restrictsByRole = Array.isArray(roles) && roles.length > 0;
+
+      if (isPublic || requiresAuth || restrictsByRole) {
+        // A level that says BOTH public and authenticated is a contradiction the author
+        // did not intend. Resolving it toward "closed" is the only safe direction, and
+        // the I5 sweep flags the combination so it does not sit there unnoticed.
+        return isPublic && !requiresAuth && !restrictsByRole;
+      }
+    }
+    return false;
   }
 }
 

@@ -165,7 +165,12 @@ class Harness {
     }): Promise<SessionRow> => {
       this.calls.push('createSession');
       this.createdSessions.push(input);
-      return Promise.resolve({ id: 'session-1', userId: input.userId, family: input.family });
+      return Promise.resolve({
+        id: 'session-1',
+        userId: input.userId,
+        family: input.family,
+        user: { role: 'CUSTOMER' },
+      });
     },
 
     rotateSession: async (input: {
@@ -292,6 +297,7 @@ describe('AuthService.login (F8)', () => {
     harness.credentials.set('ada@example.com', {
       id: USER_ID,
       passwordHash: `hash:${CREDENTIALS.password}`,
+      role: 'CUSTOMER',
     });
   });
 
@@ -385,7 +391,7 @@ describe('AuthService.refresh (F8)', () => {
   it('exchanges the presented token for a new one in the same session (AC2)', async () => {
     harness.rotationOutcome = {
       outcome: 'rotated',
-      session: { id: 'session-2', userId: USER_ID, family: 'family-1' },
+      session: { id: 'session-2', userId: USER_ID, family: 'family-1', user: { role: 'CUSTOMER' } },
     };
 
     const issued = await harness.service.refresh(PRESENTED, ORIGIN);

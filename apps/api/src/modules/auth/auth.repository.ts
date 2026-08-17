@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { RoleName } from '@repo/contracts';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 
 /**
@@ -27,6 +28,8 @@ export interface UserRow {
 export interface CredentialRow {
   id: string;
   passwordHash: string;
+  /** Minted into the access token by F10; one more column on a query already made. */
+  role: RoleName;
 }
 
 /** Where a session was created from — F9 lists these back to the account owner. */
@@ -40,6 +43,7 @@ export interface SessionRow {
   id: string;
   userId: string;
   family: string;
+  user: { role: RoleName };
 }
 
 /**
@@ -73,7 +77,15 @@ const USER_PROJECTION = {
 } as const;
 
 /** Never selects `refreshTokenHash` — a hash that is not read cannot be logged. */
-const SESSION_PROJECTION = { id: true, userId: true, family: true } as const;
+const SESSION_PROJECTION = {
+  id: true,
+  userId: true,
+  family: true,
+  // The owner's role, for the access token minted from this session (F10). A nested
+  // select is a join in the same statement, not a second query — the refresh
+  // statement-count test would catch it if it were.
+  user: { select: { role: true } },
+} as const;
 
 /** The columns F9/AC1 puts on the wire. Still no `refreshTokenHash`. */
 const SESSION_LIST_PROJECTION = {
@@ -144,7 +156,7 @@ export class AuthRepository {
   async findCredentialsByEmail(email: string): Promise<CredentialRow | null> {
     return this.prisma.client.user.findUnique({
       where: { email },
-      select: { id: true, passwordHash: true },
+      select: { id: true, passwordHash: true, role: true },
     });
   }
 
