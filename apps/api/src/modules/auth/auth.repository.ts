@@ -75,6 +75,30 @@ const USER_PROJECTION = {
 /** Never selects `refreshTokenHash` — a hash that is not read cannot be logged. */
 const SESSION_PROJECTION = { id: true, userId: true, family: true } as const;
 
+/** The columns F9/AC1 puts on the wire. Still no `refreshTokenHash`. */
+const SESSION_LIST_PROJECTION = {
+  id: true,
+  device: true,
+  ip: true,
+  lastUsedAt: true,
+  createdAt: true,
+  expiresAt: true,
+} as const;
+
+/**
+ * A session row as the list endpoint reads it — a row projection, not a wire shape.
+ * The response type is `SessionSummary` in `@repo/contracts` and the service maps to
+ * it, which is where `Date` becomes an ISO string and `current` gets decided (I2).
+ */
+export interface ActiveSessionRow {
+  id: string;
+  device: string | null;
+  ip: string | null;
+  lastUsedAt: Date;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 @Injectable()
 export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -230,6 +254,69 @@ export class AuthRepository {
   async revokeFamily(family: string, now: Date = new Date()): Promise<number> {
     const revoked = await this.prisma.client.session.updateMany({
       where: { family, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    return revoked.count;
+  }
+
+  /**
+   * The caller's live sessions, newest first (F9/AC1).
+   *
+   * "Live" is three conditions, and dropping any one shows a person rows they cannot
+   * act on: `revokedAt: null` (not killed), `rotatedAt: null` (not already exchanged
+   * for a successor — those rows are kept as reuse evidence, not as devices), and
+   * `expiresAt` in the future.
+   *
+   * `select` rather than the whole row: `refreshTokenHash` must never be read into a
+   * process that is about to serialise something, and the surest way to guarantee that
+   * is to never load it.
+   */
+  async listActiveSessions(userId: string, now: Date = new Date()): Promise<ActiveSessionRow[]> {
+    return this.prisma.client.session.findMany({
+      where: { userId, revokedAt: null, rotatedAt: null, expiresAt: { gt: now } },
+      select: SESSION_LIST_PROJECTION,
+      orderBy: { lastUsedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Revokes one session, scoped by owner (F9/AC2, I4).
+   *
+   * `userId` is part of the WHERE, not a comparison afterwards. Fetching the row and
+   * then checking who owns it leaks existence through timing, and answering 403 leaks
+   * it outright — so another account's session id is indistinguishable here from one
+   * that never existed, and both produce the 404 the service raises on a zero count.
+   *
+   * `revokedAt: null` keeps this idempotent: revoking twice returns 0 the second time
+   * and leaves the original timestamp, and the caller reads 0 as "nothing to revoke"
+   * rather than as an error.
+   */
+  async revokeSessionForUser(
+    sessionId: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const revoked = await this.prisma.client.session.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    return revoked.count;
+  }
+
+  /**
+   * Revokes whichever session a refresh token belongs to (F9/AC3).
+   *
+   * `updateMany` on the unique hash rather than `update`: a token that is unknown or
+   * already revoked matches nothing and returns 0, where `update` would throw P2025 and
+   * make the caller distinguish "no such token" from "done" — a distinction logout must
+   * not expose. No owner scope is needed because possession of the token IS the claim.
+   */
+  async revokeSessionByRefreshTokenHash(
+    refreshTokenHash: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const revoked = await this.prisma.client.session.updateMany({
+      where: { refreshTokenHash, revokedAt: null },
       data: { revokedAt: now },
     });
     return revoked.count;

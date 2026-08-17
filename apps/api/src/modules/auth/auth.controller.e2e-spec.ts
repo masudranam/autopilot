@@ -25,6 +25,7 @@ import request from 'supertest';
 import { problemDetailsSchema, ProblemType, registeredUserSchema } from '@repo/contracts';
 import { AppModule } from '../../app.module';
 import { configureApp } from '../../app.setup';
+import { REQUIRES_AUTH_KEY } from '../../common/auth/authenticated.decorator';
 import { IS_PUBLIC_KEY } from '../../common/auth/public.decorator';
 import { validateEnv } from '../../config/env';
 import { createPrismaClient, type PrismaClient } from '../../db/client';
@@ -466,7 +467,14 @@ describe('POST /auth/register', () => {
 
           const name = `${wrapper.metatype?.name ?? wrapper.name}.${methodName}`;
           routes.push(name);
-          if (Reflect.getMetadata(IS_PUBLIC_KEY, handler) !== true) undecided.push(name);
+          // EITHER marker counts, neither does not. Before F9 the only accepted answer
+          // was `@Public()`, which was fine while every route was public and actively
+          // dangerous the moment one was not: the cheapest way to green this test would
+          // have been to mark the session list public. What I5 asserts is that a
+          // decision was made, not which one.
+          const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, handler) === true;
+          const requiresAuth = Reflect.getMetadata(REQUIRES_AUTH_KEY, handler) === true;
+          if (!isPublic && !requiresAuth) undecided.push(name);
         }
       }
     }

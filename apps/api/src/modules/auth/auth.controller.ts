@@ -1,7 +1,21 @@
-import { Body, Controller, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
   ApiConflictResponse,
   ApiCookieAuth,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -10,19 +24,33 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { loginRequestSchema, REFRESH_COOKIE_NAME, registerRequestSchema } from '@repo/contracts';
+import {
+  loginRequestSchema,
+  REFRESH_COOKIE_NAME,
+  registerRequestSchema,
+  sessionIdSchema,
+} from '@repo/contracts';
 // A separate `import type` line rather than inline type specifiers on the line above:
 // the guard-write hook's payload-type heuristic reads an inline specifier as a local
 // declaration and blocks the file, even though this imports the contract rather than
 // redeclaring it.
-import type { AuthTokens, LoginRequest, RegisterRequest, RegisteredUser } from '@repo/contracts';
+import type {
+  AccessTokenClaims,
+  AuthTokens,
+  LoginRequest,
+  RegisterRequest,
+  RegisteredUser,
+  SessionSummary,
+} from '@repo/contracts';
+import { Authenticated } from '../../common/auth/authenticated.decorator';
+import type { RequestWithAuth } from '../../common/auth/jwt-auth.guard';
 import { Public } from '../../common/auth/public.decorator';
 import { ZodValidationPipe } from '../../common/validation/zod-validation.pipe';
 import type { Env } from '../../config/env';
 import { ENV } from '../../config/env.module';
 import { AuthService, type IssuedSession } from './auth.service';
 import type { SessionOrigin } from './auth.repository';
-import { setRefreshCookie } from './refresh-cookie';
+import { clearRefreshCookie, setRefreshCookie } from './refresh-cookie';
 
 /**
  * HTTP only: parse, delegate, serialise. Every rule lives in the service.
@@ -117,6 +145,74 @@ export class AuthController {
   }
 
   /**
+   * The caller's active sessions (F9/AC1).
+   *
+   * `request.auth` is populated by `JwtAuthGuard`, which is global from F9 — so this
+   * handler cannot run without verified claims, and `sub`/`sid` are trustworthy rather
+   * than read from anything the client sent.
+   */
+  @Authenticated()
+  @Get('sessions')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "List the caller's active sessions" })
+  @ApiOkResponse({ description: 'Active sessions, newest use first. Never any token material.' })
+  @ApiUnauthorizedResponse({ description: 'Missing, malformed or expired access token.' })
+  listSessions(@Req() request: RequestWithAuth): Promise<SessionSummary[]> {
+    const auth = claimsOf(request);
+    return this.auth.listSessions(auth.sub, auth.sid);
+  }
+
+  /**
+   * Revokes one session (F9/AC2, AC4).
+   *
+   * 404 rather than 403 for another account's session id, and the ownership check is
+   * part of the database query rather than a comparison here — see the repository. A
+   * 403 would confirm the id exists, which is the leak I4 exists to prevent.
+   */
+  @Authenticated()
+  @Delete('sessions/:id')
+  @HttpCode(204)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke one of the caller’s sessions' })
+  @ApiNoContentResponse({ description: 'The session is revoked; its refresh token is now dead.' })
+  @ApiNotFoundResponse({
+    description: "No such active session for this caller — including another account's session.",
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing, malformed or expired access token.' })
+  async revokeSession(
+    @Req() request: RequestWithAuth,
+    @Param('id', new ZodValidationPipe(sessionIdSchema)) id: string,
+  ): Promise<void> {
+    await this.auth.revokeSession(id, claimsOf(request).sub);
+  }
+
+  /**
+   * Ends the current session and clears the cookie (F9/AC3).
+   *
+   * `@Public()` on purpose, and it is not a hole. Logout is driven by the refresh
+   * cookie, not the access token, so a client whose access token has already expired
+   * can still sign out — requiring a valid access token here would mean "sign in again
+   * to sign out". Possession of the cookie is the only claim being made, and the worst
+   * an attacker without it can do is clear their own.
+   *
+   * Always 204, whatever the cookie was. See `AuthService.logout` for why an unknown
+   * token must not answer differently from a real one.
+   */
+  @Public()
+  @Post('logout')
+  @HttpCode(204)
+  @ApiCookieAuth(REFRESH_COOKIE_NAME)
+  @ApiOperation({ summary: 'Revoke the current session and clear the refresh cookie' })
+  @ApiNoContentResponse({ description: 'Signed out. Answers 204 even if no session was found.' })
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    await this.auth.logout(cookieValue(request, REFRESH_COOKIE_NAME));
+    clearRefreshCookie(response, this.env);
+  }
+
+  /**
    * The only place a plaintext refresh token is written anywhere, and it is written to
    * a header — never to the body, which is why `IssuedSession.tokens` is returned
    * rather than `issued`.
@@ -156,4 +252,20 @@ function originOf(request: Request): SessionOrigin {
     device: typeof userAgent === 'string' ? userAgent.slice(0, 255) : null,
     ip: request.ip ?? null,
   };
+}
+
+/**
+ * The verified claims, or a loud failure.
+ *
+ * `RequestWithAuth.auth` is optional because the type describes a request both before
+ * and after the guard. On an `@Authenticated()` route the guard has already run, so
+ * absence here means the guard was unregistered or the decorator lost — a wiring bug,
+ * not a client error. Throwing beats `!` : it fails as a 500 that names the cause
+ * instead of a TypeError deep in a handler.
+ */
+function claimsOf(request: RequestWithAuth): AccessTokenClaims {
+  if (!request.auth) {
+    throw new Error('Route is marked @Authenticated but no claims were attached by the guard');
+  }
+  return request.auth;
 }

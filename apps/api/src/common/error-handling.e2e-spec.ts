@@ -11,6 +11,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { problemDetailsSchema, ProblemType } from '@repo/contracts';
 import { AppModule } from '../app.module';
+import { Public } from './auth/public.decorator';
 import { configureApp } from '../app.setup';
 import { validateEnv } from '../config/env';
 import { ConflictError, NotFoundError } from './errors/domain-error';
@@ -19,22 +20,26 @@ import { logger } from './logging/logger';
 
 @Controller('boom')
 class BoomController {
+  @Public()
   @Get('domain')
   domain(): never {
     throw new NotFoundError('No such widget.');
   }
 
+  @Public()
   @Get('conflict')
   conflict(): never {
     throw new ConflictError('Already exists.');
   }
 
+  @Public()
   @Get('leaky')
   leaky(): never {
     throw new Error('select * from "users" where email = $1 // at /srv/app/dist/users.js:12');
   }
 
   /** Echoes the id the request is running under, to prove header/body/log agreement. */
+  @Public()
   @Get('trace')
   trace(): { traceId: string } {
     logger.info('inside boom/trace');

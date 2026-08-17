@@ -47,6 +47,62 @@ class ProbeController {
   }
 }
 
+/**
+ * No `@UseGuards`, no `@Public()`, no `@Authenticated()` — nothing at all.
+ *
+ * This is the whole point of F9's global registration. Before it, a controller like
+ * this was WIDE OPEN and the only thing standing between the API and an accidental
+ * public endpoint was remembering to decorate it. The test below asserts the default
+ * is now closed, which is what SPEC F10/AC3 asked for and F9 delivers.
+ */
+@Controller('undecorated')
+class UndecoratedController {
+  @Get('route')
+  route(): { reached: true } {
+    return { reached: true };
+  }
+}
+
+describe('a route with no authorisation decorator is denied by default (I5)', () => {
+  let app: INestApplication;
+  let tokens: AccessTokenService;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, AuthModule],
+      controllers: [UndecoratedController],
+    }).compile();
+    app = moduleRef.createNestApplication({ bodyParser: false });
+    configureApp(app, validateEnv({ NODE_ENV: 'test' }));
+    await app.init();
+    tokens = app.get(AccessTokenService);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('answers 401 without a token', async () => {
+    await request(app.getHttpServer()).get('/api/v1/undecorated/route').expect(401);
+  });
+
+  /**
+   * The other half, and the reason this is not just "deny everything".
+   *
+   * A default that refused even a valid token would be indistinguishable from a broken
+   * route, and the suite would pass while the API was unusable. Denied-by-default has
+   * to mean authenticated-only.
+   */
+  it('answers 200 with a valid token — closed, not broken', async () => {
+    const token = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID }).accessToken;
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/undecorated/route')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(response.body).toEqual({ reached: true });
+  });
+});
+
 describe('bearer access tokens (F8/AC5)', () => {
   let app: INestApplication;
   let tokens: AccessTokenService;

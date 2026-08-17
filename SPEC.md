@@ -380,13 +380,17 @@ service, Problem Details filter, wiring — is production code; only the route i
 - AC2 `DELETE /auth/sessions/:id` revokes one; revoking another user's session returns 404 (I4).
 - AC3 `POST /auth/logout` revokes the current session and clears the cookie.
 - AC4 A revoked session's refresh token cannot be used.
+- AC5 `JwtAuthGuard` is registered globally, so a route with no authorisation decorator is denied by
+  default — a test asserts the default is closed, not open (I5). _Moved here from F10/AC3: F9 adds
+  the first non-public routes, and without the guard the I5 sweep would have been satisfied by
+  marking a session list `@Public()`._
 
 **F10 · RBAC** — _deps: F8_
 
 - AC1 `@Roles()` decorator + guard covering `CUSTOMER`, `SUPPORT`, `ADMIN`.
 - AC2 Every admin route rejects a customer token with 403.
-- AC3 A route with no explicit auth decorator is denied by default — a test asserts the default is
-  closed, not open (I5).
+- AC3 _Moved to F9/AC5._ Default-closed landed with F9, which needed it; F10 narrows the
+  authenticated default to specific roles rather than establishing it.
 
 **F11 · Email verification & password reset** — _deps: F7, F39_
 
