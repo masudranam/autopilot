@@ -47,8 +47,9 @@ database.
 - Authorisation costs nothing per request. No query, no cache, no invalidation.
 - The role is covered by the token's signature, so it cannot be tampered with — the algorithm
   pinning in `access-token.service.ts` is what makes that true.
-- Revoking a session already revokes its tokens (F9), so the emergency path for "this account must
-  lose access now" exists and is independent of this decision.
+- Revoking a session stops it continuing — the next refresh fails. It does **not** invalidate an
+  access token already issued; see the unconditional window below, which is the honest limit of
+  "this account must lose access now".
 
 **Bad**
 
