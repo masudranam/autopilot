@@ -57,6 +57,36 @@ test('ignores a word ending in "enum" — the keyword must stand alone', () => {
   assert.deepEqual(parseEnums('model Denum {\n  a B\n}'), []);
 });
 
+test('THROWS on a value-level attribute rather than dropping the value', () => {
+  // The bug the first version shipped with: `SUPPORT @map("support")` vanished, the
+  // generator and the drift check agreed with each other, and check:enums reported
+  // success while the contract was missing a role the database can return.
+  assert.throws(
+    () =>
+      parseEnums(
+        ['enum Role {', '  CUSTOMER', '  SUPPORT @map("support")', '  ADMIN', '}'].join('\n'),
+      ),
+    /cannot parse the line/,
+  );
+});
+
+test('the thrown message names the enum and the offending line', () => {
+  try {
+    parseEnums(['enum Role {', '  SUPPORT @map("support")', '}'].join('\n'));
+    assert.fail('expected a throw');
+  } catch (error) {
+    assert.match(error.message, /enum Role/);
+    assert.match(error.message, /SUPPORT @map/);
+  }
+});
+
+test('throws rather than silently emitting an enum with no values', () => {
+  assert.throws(
+    () => parseEnums(['enum Role {', '  @@map("role")', '}'].join('\n')),
+    /no values found/,
+  );
+});
+
 test('returns nothing for a schema with no enums', () => {
   assert.deepEqual(parseEnums('model User {\n  id String\n}'), []);
 });

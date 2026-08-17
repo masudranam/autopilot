@@ -13,7 +13,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { OUTPUT_PATH, renderFromSchema } from './generate-enums.mjs';
 
-const expected = renderFromSchema();
+// The parser throws on a line it does not understand rather than dropping the value.
+// Caught here so that surfaces as a check failure naming the problem, not as an
+// unhandled stack trace with the useful sentence buried in it.
+let expected;
+try {
+  expected = renderFromSchema();
+} catch (error) {
+  console.error(`check:enums: cannot read schema.prisma.\n\n${error.message}`);
+  process.exit(1);
+}
 
 if (!existsSync(OUTPUT_PATH)) {
   console.error(

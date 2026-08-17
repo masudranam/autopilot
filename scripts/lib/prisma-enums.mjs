@@ -29,16 +29,47 @@ export function parseEnums(schemaText) {
     const name = match[2];
     const body = match[3] ?? '';
 
-    const values = body
+    const lines = body
       .split('\n')
       .map((line) => line.replace(/\/\/.*$/, '').trim())
-      .filter((line) => line.length > 0 && !line.startsWith('@@'))
-      // A value is a bare identifier. Anything else in an enum block is an attribute
-      // this parser does not need to understand, and silently dropping it would be
-      // worse than not matching it — so require the whole line to be an identifier.
-      .filter((line) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(line));
+      .filter((line) => line.length > 0 && !line.startsWith('@@'));
 
-    if (values.length > 0) enums.push({ name, values });
+    // THROW on a line this parser does not understand — do not skip it.
+    //
+    // The first version filtered to bare identifiers and dropped the rest, with a
+    // comment claiming that was safer. It was the opposite. A value carrying a
+    // Prisma value-level attribute — `SUPPORT @map("support")` — vanished from the
+    // output, and because `check-enums-generated.mjs` compares the committed file
+    // against THIS parser's output, the drift was self-consistent: the generator and
+    // the check agreed with each other while both disagreed with the schema, and
+    // `check:enums` reported success. A check that cannot see a real divergence is
+    // worse than no check, because it is trusted.
+    //
+    // Failing loudly means an unsupported attribute is a build error naming the line,
+    // which is a five-minute fix here, rather than a value silently missing from a
+    // contract until something rejects it at runtime.
+    const values = lines.map((line) => {
+      const match = /^([A-Za-z_][A-Za-z0-9_]*)$/.exec(line);
+      if (!match) {
+        throw new Error(
+          `enum ${name}: cannot parse the line ${JSON.stringify(line)}.\n` +
+            'This parser handles bare enum values and @@map only. If the schema now uses a\n' +
+            'value-level attribute, teach scripts/lib/prisma-enums.mjs about it — do not let\n' +
+            'the value be dropped, or the generated contract will silently disagree with the\n' +
+            'database while check:enums reports success.',
+        );
+      }
+      return match[1];
+    });
+
+    // An enum with no values is a schema the parser misread, not an empty enum —
+    // Prisma rejects `enum X {}`. Dropping it silently would hide the same class of
+    // bug one level up.
+    if (values.length === 0) {
+      throw new Error(`enum ${name}: no values found. This is almost certainly a parser bug.`);
+    }
+
+    enums.push({ name, values });
   }
 
   return enums.sort((a, b) => a.name.localeCompare(b.name));

@@ -81,9 +81,15 @@ const SESSION_PROJECTION = {
   id: true,
   userId: true,
   family: true,
-  // The owner's role, for the access token minted from this session (F10). A nested
-  // select is a join in the same statement, not a second query — the refresh
-  // statement-count test would catch it if it were.
+  // The owner's role, for the access token minted from this session (F10).
+  //
+  // This DOES add a SQL statement: Prisma loads a relation with a separate query
+  // unless `relationJoins` is enabled, which it is not. An earlier comment here
+  // claimed it was a join in the same statement and that the refresh
+  // statement-count test would catch it otherwise — both wrong. That test counts
+  // Prisma CLIENT OPERATIONS, so `session.create` stays one entry no matter how
+  // many statements it issues. One indexed lookup per refresh is the accepted
+  // cost; see ADR-0010.
   user: { select: { role: true } },
 } as const;
 

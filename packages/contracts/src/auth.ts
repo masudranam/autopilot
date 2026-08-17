@@ -87,9 +87,10 @@ export type RegisterRequest = z.infer<typeof registerRequestSchema>;
  *
  * `role` is absent deliberately. Registration always produces a CUSTOMER, and the
  * only correct way to put a role on the wire is the enum generated from
- * `schema.prisma` (rules/20-contracts.md §3). That generator does not exist yet, and
- * hand-writing `z.enum(['CUSTOMER', ...])` here would be the exact duplication the
- * rule forbids. It arrives with RBAC (F10).
+ * `schema.prisma` (rules/20-contracts.md §3). That generator arrived with F10
+ * (`pnpm gen:enums`), so `roleSchema` above is derived from it — but registration
+ * always produces a CUSTOMER, and a role on this response would invite a client to
+ * treat it as settable.
  */
 export const registeredUserSchema = z.object({
   id: z.uuid(),

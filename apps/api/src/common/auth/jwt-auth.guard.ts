@@ -82,8 +82,11 @@ export class JwtAuthGuard implements CanActivate {
 
       if (isPublic || requiresAuth || restrictsByRole) {
         // A level that says BOTH public and authenticated is a contradiction the author
-        // did not intend. Resolving it toward "closed" is the only safe direction, and
-        // the I5 sweep flags the combination so it does not sit there unnoticed.
+        // did not intend. Resolving it toward "closed" is the only safe direction.
+        //
+        // Note the sweep does NOT flag that combination — it only flags a route with
+        // no marker at all — so this resolution is the sole protection, not a backstop
+        // behind a test. (An earlier comment here claimed otherwise.)
         return isPublic && !requiresAuth && !restrictsByRole;
       }
     }

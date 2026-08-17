@@ -12,6 +12,7 @@
 import 'reflect-metadata';
 import type { Server } from 'node:http';
 import { Controller, Get, type INestApplication } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { problemDetailsSchema, ProblemType, Role } from '@repo/contracts';
@@ -23,6 +24,7 @@ import { validateEnv } from '../../config/env';
 import { Authenticated } from './authenticated.decorator';
 import { Public } from './public.decorator';
 import { Roles } from './roles.decorator';
+import { RolesGuard } from './roles.guard';
 
 const USER_ID = '018f1f77-bcf8-7c3d-9a3b-2c4c6b3f0a11';
 const SESSION_ID = '018f1f77-bcf8-7c3d-9a3b-2c4c6b3f0a22';
@@ -56,6 +58,22 @@ class RbacProbeController {
  * handler metadata, saw `@Roles()`/`@Authenticated()` and reported the routes as
  * decided. Open at runtime, green in CI.
  */
+/** The inverse of MixedProbe: a role-gated controller with one deliberately open route. */
+@Roles(Role.ADMIN)
+@Controller('staff-area')
+class StaffAreaProbeController {
+  @Public()
+  @Get('open')
+  open(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Get('inherited')
+  inherited(): { ok: true } {
+    return { ok: true };
+  }
+}
+
 @Public()
 @Controller('mixed')
 class MixedProbeController {
@@ -87,7 +105,7 @@ describe('role-based authorisation (F10)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule, AuthModule],
-      controllers: [RbacProbeController, MixedProbeController],
+      controllers: [RbacProbeController, MixedProbeController, StaffAreaProbeController],
     }).compile();
 
     app = moduleRef.createNestApplication({ bodyParser: false });
@@ -158,6 +176,18 @@ describe('role-based authorisation (F10)', () => {
     await request(app.getHttpServer()).get('/api/v1/rbac/admin-only').expect(401);
   });
 
+  it('a bare handler inherits the controller-level @Roles', async () => {
+    await request(app.getHttpServer()).get('/api/v1/staff-area/inherited').expect(401);
+    await request(app.getHttpServer())
+      .get('/api/v1/staff-area/inherited')
+      .set('Authorization', `Bearer ${tokenFor(Role.CUSTOMER)}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/api/v1/staff-area/inherited')
+      .set('Authorization', `Bearer ${tokenFor(Role.ADMIN)}`)
+      .expect(200);
+  });
+
   /**
    * Guard ORDER, which is a real failure mode rather than a hypothetical.
    *
@@ -197,9 +227,68 @@ describe('role-based authorisation (F10)', () => {
       .expect(200);
   });
 
+  it('a handler @Public inside a @Roles controller is public, not a dead route', async () => {
+    // Found by probing during the review of PR #90: with getAllAndOverride this
+    // answered 403 to EVERYONE including the named role — JwtAuthGuard honoured the
+    // handler's public marker and attached no claims, then RolesGuard found the
+    // class's roles and rejected for want of one. Closed, but silently bricked.
+    await request(app.getHttpServer()).get('/api/v1/staff-area/open').expect(200);
+  });
+
   it('a class-level @Public still opens a handler that declares nothing', async () => {
     // The other direction. A fix that closed everything would pass the two tests above
     // while breaking every genuinely public controller.
     await request(app.getHttpServer()).get('/api/v1/mixed/open').expect(200);
+  });
+});
+
+/**
+ * `RolesGuard` alone, with no `JwtAuthGuard` in front of it.
+ *
+ * The branch under test is `!role` in `canActivate` — the one whose comment says it
+ * "must fail closed" because returning true "would make every @Roles route public".
+ * The review of PR #90 mutated it to admit and watched all 42 tests stay green: the
+ * branch was real, reachable, and covered by nothing.
+ *
+ * This is the missing test. It builds a module where the JWT guard is genuinely absent,
+ * which is what a wiring mistake looks like, and asserts the role guard still refuses.
+ */
+@Controller('nojwt')
+class NoJwtProbeController {
+  @Roles(Role.ADMIN)
+  @Get('admin')
+  admin(): { ok: true } {
+    return { ok: true };
+  }
+}
+
+describe('RolesGuard fails closed when no claims were attached', () => {
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [NoJwtProbeController],
+      providers: [RolesGuard, { provide: APP_GUARD, useExisting: RolesGuard }],
+    }).compile();
+
+    app = moduleRef.createNestApplication({ bodyParser: false });
+    configureApp(app, validateEnv({ NODE_ENV: 'test' }));
+    await app.init();
+    const server = app.getHttpServer() as Server;
+    if (!server.listening) {
+      await new Promise<void>((resolve) => {
+        server.listen(0, () => resolve());
+      });
+    }
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('refuses rather than admitting a request with no role claim', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1/nojwt/admin').expect(403);
+    const problem = problemDetailsSchema.parse(response.body);
+    expect(problem.type).toBe(ProblemType.FORBIDDEN);
   });
 });
