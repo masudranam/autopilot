@@ -731,8 +731,8 @@ Updated by the loop as each feature merges.
 
 | Epic             | Done  | Total  |
 | ---------------- | ----- | ------ |
-| E0 Foundation    | 2     | 6      |
-| E1 Identity      | 0     | 6      |
+| E0 Foundation    | 6     | 6      |
+| E1 Identity      | 3     | 6      |
 | E2 Catalog       | 0     | 7      |
 | E3 Search        | 0     | 4      |
 | E4 Cart          | 0     | 4      |
@@ -741,4 +741,4 @@ Updated by the loop as each feature merges.
 | E7 Merchandising | 0     | 5      |
 | E8 Admin         | 0     | 5      |
 | E9 Hardening     | 0     | 5      |
-| **Total**        | **2** | **54** |
+| **Total**        | **9** | **54** |
