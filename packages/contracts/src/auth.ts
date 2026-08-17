@@ -200,3 +200,55 @@ export const accessTokenClaimsSchema = z.object({
 });
 
 export type AccessTokenClaims = z.infer<typeof accessTokenClaimsSchema>;
+
+/**
+ * One active session, as the account's device list shows it (F9/AC1).
+ *
+ * "Active" means still usable: not revoked, not already rotated into a successor, not
+ * expired. A rotated row is kept in the database as reuse evidence (see `schema.prisma`)
+ * but it is spent, and listing it would show a person one row per refresh — hundreds
+ * of "devices" for one browser.
+ *
+ * `current` lets the UI mark "this device" without the client comparing anything it
+ * would have to be told separately. The server knows which session minted the access
+ * token — it is the `sid` claim — so it answers rather than exporting the question.
+ *
+ * No refresh token, and no hash of one. The whole point of storing only hashes is that
+ * the value never leaves the database; putting the hash on the wire would make it a
+ * bearer credential again for anyone who can replay it against a lookup.
+ */
+export const sessionSummarySchema = z.object({
+  id: z.uuid(),
+  /** Free text from the User-Agent, or null when the client sent none. */
+  device: z.string().nullable(),
+  ip: z.string().nullable(),
+  lastUsedAt: z.iso.datetime(),
+  createdAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+  /** True for the session whose access token made this request. */
+  current: z.boolean(),
+});
+
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+
+/**
+ * The list response.
+ *
+ * A bare array rather than the paginated envelope from `pagination.ts`: sessions are
+ * bounded by how many devices one person signs in from, the set is already filtered to
+ * active rows, and a cursor over a handful of rows is machinery with nothing to do.
+ * `paginatedSchema` stays the rule for open-ended collections (rules/20-contracts.md §5).
+ */
+export const sessionListSchema = z.array(sessionSummarySchema);
+
+export type SessionList = z.infer<typeof sessionListSchema>;
+
+/**
+ * A session id in a path parameter (F9/AC2).
+ *
+ * Parsed rather than passed through: ids are `uuid(7)` and anything else cannot name a
+ * row, so a malformed value is a 422 at the edge instead of reaching the database as a
+ * query parameter. Prisma parameterises regardless — this is about answering the wrong
+ * shape consistently, not about injection.
+ */
+export const sessionIdSchema = z.uuid();

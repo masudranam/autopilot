@@ -57,3 +57,21 @@ export function setRefreshCookie(
   const maxAgeMs = Math.max(0, expiresAt.getTime() - now.getTime());
   response.cookie(REFRESH_COOKIE_NAME, token, refreshCookieOptions(env, maxAgeMs));
 }
+
+/**
+ * Removes the refresh cookie on logout (F9/AC3).
+ *
+ * `clearCookie` only matches when the attributes match what was set — a browser keys a
+ * cookie on name, domain AND path, so clearing with a different path leaves the original
+ * in place and the client keeps sending a token it believes is gone. Reusing
+ * `refreshCookieOptions` is what keeps those in step; `maxAge` is irrelevant to a clear
+ * and is passed as 0 rather than being special-cased.
+ *
+ * Clearing the cookie is the client half only. The server half — revoking the session so
+ * the token is dead even if a copy was taken — is `AuthService.logout`, and it is the
+ * half that actually matters: a cookie deleted from one browser is not a credential
+ * withdrawn from whoever else has it.
+ */
+export function clearRefreshCookie(response: Response, env: Env): void {
+  response.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(env, 0));
+}

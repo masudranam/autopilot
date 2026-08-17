@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { refreshTokenSchema } from '@repo/contracts';
+import type { SessionSummary } from '@repo/contracts';
 import type { AuthTokens, LoginRequest, RegisterRequest, RegisteredUser } from '@repo/contracts';
-import { ConflictError, UnauthenticatedError } from '../../common/errors/domain-error';
+import {
+  ConflictError,
+  NotFoundError,
+  UnauthenticatedError,
+} from '../../common/errors/domain-error';
 import { logger } from '../../common/logging/logger';
 import { AuthRepository, type SessionOrigin } from './auth.repository';
 import { normaliseEmail } from './email-normalisation';
@@ -196,5 +201,62 @@ export class AuthService {
     }
 
     throw new UnauthenticatedError(SESSION_NOT_VALID);
+  }
+
+  /**
+   * The caller's active sessions (F9/AC1).
+   *
+   * `currentSessionId` is the `sid` claim of the access token that made the request, so
+   * "which of these is this device" is answered by the server rather than left for a
+   * client to work out. Mapped field by field: widening the projection later must not
+   * silently add a column to a response that is, by definition, about credentials.
+   */
+  async listSessions(userId: string, currentSessionId: string): Promise<SessionSummary[]> {
+    const sessions = await this.users.listActiveSessions(userId);
+    return sessions.map((session) => ({
+      id: session.id,
+      device: session.device,
+      ip: session.ip,
+      lastUsedAt: session.lastUsedAt.toISOString(),
+      createdAt: session.createdAt.toISOString(),
+      expiresAt: session.expiresAt.toISOString(),
+      current: session.id === currentSessionId,
+    }));
+  }
+
+  /**
+   * Revokes one of the caller's sessions (F9/AC2, AC4).
+   *
+   * Ownership is enforced in the repository's WHERE clause, so a session belonging to
+   * someone else and a session that never existed are the same 404 here — no branch in
+   * this method can tell them apart, which is the point (I4).
+   *
+   * Already-revoked is also a 404 rather than a 204. Reporting success for a row that
+   * this call did not change would tell a caller "revoked just now" about a session
+   * killed an hour ago by someone else, and the honest answer to "revoke this active
+   * session" when it is not an active session is that there is no such thing.
+   */
+  async revokeSession(sessionId: string, userId: string): Promise<void> {
+    const revoked = await this.users.revokeSessionForUser(sessionId, userId);
+    if (revoked === 0) throw new NotFoundError('No such session.');
+  }
+
+  /**
+   * Ends the current session (F9/AC3).
+   *
+   * Driven by the refresh cookie rather than the access token's `sid`, because logout
+   * must work for a client whose access token has already expired — that client still
+   * holds a valid refresh token, and telling it to sign in again in order to sign out
+   * would be absurd.
+   *
+   * Unknown, malformed and already-revoked tokens all succeed silently. Logout is not
+   * an oracle: a caller learning that a token it presented was "not found" learns
+   * whether that token was ever real. The cookie is cleared either way, so the
+   * observable outcome — signed out — is identical.
+   */
+  async logout(presented: string | undefined): Promise<void> {
+    const parsed = refreshTokenSchema.safeParse(presented);
+    if (!parsed.success) return;
+    await this.users.revokeSessionByRefreshTokenHash(this.refreshTokens.hash(parsed.data));
   }
 }
