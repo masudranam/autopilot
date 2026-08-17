@@ -6,7 +6,7 @@ import {
   ACCESS_TOKEN_TTL_SECONDS,
   accessTokenClaimsSchema,
 } from '@repo/contracts';
-import type { AccessTokenClaims, AuthTokens } from '@repo/contracts';
+import type { AccessTokenClaims, AuthTokens, RoleName } from '@repo/contracts';
 import { UnauthenticatedError } from '../../../common/errors/domain-error';
 import type { Env } from '../../../config/env';
 import { ENV } from '../../../config/env.module';
@@ -38,14 +38,18 @@ export class AccessTokenService {
    * an access token's lineage — a stateless token with only `sub` in it stays valid for
    * its full lifetime after the session is revoked, and there is nothing to look up.
    */
-  issue(input: { userId: string; sessionId: string }): AuthTokens {
-    const accessToken = jwt.sign({ sid: input.sessionId }, this.env.JWT_ACCESS_SECRET, {
-      algorithm: 'HS256',
-      subject: input.userId,
-      issuer: ACCESS_TOKEN_ISSUER,
-      audience: ACCESS_TOKEN_AUDIENCE,
-      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
-    });
+  issue(input: { userId: string; sessionId: string; role: RoleName }): AuthTokens {
+    const accessToken = jwt.sign(
+      { sid: input.sessionId, role: input.role },
+      this.env.JWT_ACCESS_SECRET,
+      {
+        algorithm: 'HS256',
+        subject: input.userId,
+        issuer: ACCESS_TOKEN_ISSUER,
+        audience: ACCESS_TOKEN_AUDIENCE,
+        expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      },
+    );
 
     return { accessToken, tokenType: 'Bearer', expiresIn: ACCESS_TOKEN_TTL_SECONDS };
   }

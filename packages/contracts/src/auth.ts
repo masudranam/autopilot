@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ROLE_VALUES } from './enums.generated';
 
 /**
  * Identity contracts (SPEC.md F7 — registration, F8 — login and tokens).
@@ -86,9 +87,10 @@ export type RegisterRequest = z.infer<typeof registerRequestSchema>;
  *
  * `role` is absent deliberately. Registration always produces a CUSTOMER, and the
  * only correct way to put a role on the wire is the enum generated from
- * `schema.prisma` (rules/20-contracts.md §3). That generator does not exist yet, and
- * hand-writing `z.enum(['CUSTOMER', ...])` here would be the exact duplication the
- * rule forbids. It arrives with RBAC (F10).
+ * `schema.prisma` (rules/20-contracts.md §3). That generator arrived with F10
+ * (`pnpm gen:enums`), so `roleSchema` above is derived from it — but registration
+ * always produces a CUSTOMER, and a role on this response would invite a client to
+ * treat it as settable.
  */
 export const registeredUserSchema = z.object({
   id: z.uuid(),
@@ -180,18 +182,39 @@ export const ACCESS_TOKEN_ISSUER = 'agentic-shop';
 export const ACCESS_TOKEN_AUDIENCE = 'agentic-shop-api';
 
 /**
+ * The caller's role, straight from the Prisma enum (rules/20-contracts.md §3).
+ *
+ * `z.enum(ROLE_VALUES)` rather than `z.enum(['CUSTOMER', ...])`: the values come from
+ * the generated module, so adding a role to `schema.prisma` and forgetting to update
+ * this file is impossible — there is nothing here to update. A hand-written union would
+ * silently keep rejecting the new value long after the database started returning it.
+ */
+export const roleSchema = z.enum(ROLE_VALUES);
+
+export type RoleName = z.infer<typeof roleSchema>;
+
+/**
  * The verified claims of an access token.
  *
  * A JWT payload is a wire shape — the storefront decodes `exp` to refresh proactively —
  * so it is declared here and nowhere else. `sid` binds the access token to the session
  * that minted it, which is what lets F9 revoke an access token's lineage.
  *
- * No `role` claim yet: roles are a Prisma enum, and rules/20-contracts.md §3 forbids
- * hand-writing a union that mirrors one. It arrives with the generated enum in F10.
+ * `role` arrived with F10, typed from the generated Prisma enum rather than a
+ * hand-written union.
  */
 export const accessTokenClaimsSchema = z.object({
   sub: z.uuid(),
   sid: z.uuid(),
+  /**
+   * The role at the moment the token was minted (F10).
+   *
+   * In the token rather than read per request: authorisation would otherwise cost a
+   * database round trip on every authenticated call to reflect a change that happens
+   * almost never. The cost is that a role change takes effect at the next refresh
+   * rather than instantly — up to the 15-minute access TTL. See ADR-0010.
+   */
+  role: roleSchema,
   iss: z.literal(ACCESS_TOKEN_ISSUER),
   aud: z.literal(ACCESS_TOKEN_AUDIENCE),
   /** Seconds since the epoch, as RFC 7519 requires — not milliseconds. */

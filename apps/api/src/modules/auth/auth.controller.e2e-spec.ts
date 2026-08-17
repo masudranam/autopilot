@@ -26,6 +26,7 @@ import { problemDetailsSchema, ProblemType, registeredUserSchema } from '@repo/c
 import { AppModule } from '../../app.module';
 import { configureApp } from '../../app.setup';
 import { REQUIRES_AUTH_KEY } from '../../common/auth/authenticated.decorator';
+import { ROLES_KEY } from '../../common/auth/roles.decorator';
 import { IS_PUBLIC_KEY } from '../../common/auth/public.decorator';
 import { validateEnv } from '../../config/env';
 import { createPrismaClient, type PrismaClient } from '../../db/client';
@@ -474,7 +475,11 @@ describe('POST /auth/register', () => {
           // decision was made, not which one.
           const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, handler) === true;
           const requiresAuth = Reflect.getMetadata(REQUIRES_AUTH_KEY, handler) === true;
-          if (!isPublic && !requiresAuth) undecided.push(name);
+          // `@Roles()` implies authentication — requiring a role requires a token — so
+          // it counts as a decision on its own and a route need not carry both.
+          const roles: unknown = Reflect.getMetadata(ROLES_KEY, handler);
+          const restrictsByRole = Array.isArray(roles) && roles.length > 0;
+          if (!isPublic && !requiresAuth && !restrictsByRole) undecided.push(name);
         }
       }
     }

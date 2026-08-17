@@ -146,7 +146,11 @@ export class AuthService {
     });
 
     return {
-      tokens: this.accessTokens.issue({ userId: session.userId, sessionId: session.id }),
+      tokens: this.accessTokens.issue({
+        userId: session.userId,
+        sessionId: session.id,
+        role: credentials.role,
+      }),
       refreshToken: refresh.token,
       refreshTokenExpiresAt: refresh.expiresAt,
     };
@@ -182,6 +186,9 @@ export class AuthService {
         tokens: this.accessTokens.issue({
           userId: result.session.userId,
           sessionId: result.session.id,
+          // From the session's owner row, so a role change takes effect on the next
+          // refresh rather than being frozen at first login.
+          role: result.session.user.role,
         }),
         refreshToken: next.token,
         refreshTokenExpiresAt: next.expiresAt,

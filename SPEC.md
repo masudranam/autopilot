@@ -367,12 +367,12 @@ Dependencies are hard ordering constraints.
 - AC4 Wrong credentials return 401 with a generic message, in constant time relative to a valid one.
 - AC5 Access tokens expire in 15 minutes; expired tokens return 401, not 500.
 
-_Note on AC5:_ F8 ships the `JwtAuthGuard` that turns a bearer token into verified claims, but does
-NOT register it globally — "a route with no decorator is denied by default" is F10/AC3 and needs
-`@Roles()` in the same change. F8 therefore has no protected production route to point AC5 at (`/me`
-is F12, `/auth/sessions` is F9), so the end-to-end 401-not-500 test mounts the real guard on a probe
-controller declared inside `jwt-auth.guard.e2e-spec.ts`. Everything under test — guard, token
-service, Problem Details filter, wiring — is production code; only the route is synthetic.
+_Note on AC5:_ F8 ships the `JwtAuthGuard` that turns a bearer token into verified claims but does
+not register it globally; that landed in F9/AC5, where the first non-public routes made it
+load-bearing. F8 therefore had no protected production route to point AC5 at, so the end-to-end
+401-not-500 test mounts the real guard on a probe controller declared inside
+`jwt-auth.guard.e2e-spec.ts`. Everything under test — guard, token service, Problem Details filter,
+wiring — is production code; only the route is synthetic.
 
 **F9 · Sessions** — _deps: F8_
 
@@ -387,10 +387,19 @@ service, Problem Details filter, wiring — is production code; only the route i
 
 **F10 · RBAC** — _deps: F8_
 
-- AC1 `@Roles()` decorator + guard covering `CUSTOMER`, `SUPPORT`, `ADMIN`.
-- AC2 Every admin route rejects a customer token with 403.
+- AC1 `@Roles()` decorator + guard covering `CUSTOMER`, `SUPPORT`, `ADMIN`. The role travels as an
+  access-token claim rather than a per-request database read — see
+  [ADR-0010](docs/adr/0010-role-in-the-access-token.md) for the trade, including the up-to-15-minute
+  window before a role change takes effect.
+- AC2 Every admin route rejects a customer token with 403. Until E8 adds real admin routes this is
+  asserted on a probe controller, the same way F8 tested the bearer guard before any protected route
+  existed.
 - AC3 _Moved to F9/AC5._ Default-closed landed with F9, which needed it; F10 narrows the
   authenticated default to specific roles rather than establishing it.
+- AC4 Prisma enums are generated into `@repo/contracts` (`pnpm gen:enums`) and `check:repo` fails on
+  drift. _Added in F10: putting a role on the wire needs `Role` in the contracts package, and
+  rules/20-contracts.md §3 forbids hand-writing a union that mirrors a database enum — so the
+  generator that rule assumes had to exist before AC1 could be built correctly._
 
 **F11 · Email verification & password reset** — _deps: F7, F39_
 

@@ -12,9 +12,10 @@ export const IS_PUBLIC_KEY = 'auth:isPublic';
  * must be distinguishable, otherwise a route added without thought is indistinguishable
  * from a route that was thought about.
  *
- * The guard that reads this metadata and denies everything without it arrives with RBAC
- * (F10/AC3), which is where "default closed" gets its test. Applying the marker now
- * means F10 is a guard plus a `@Roles()` decorator, not a sweep through every existing
- * controller — the sweep is where a route gets missed.
+ * `JwtAuthGuard` reads this metadata and has been globally registered since F9/AC5, so
+ * an undecorated route is denied rather than open. From F10 the guard resolves this
+ * marker against `@Authenticated()` and `@Roles()` together: a handler-level decision
+ * beats a class-level one, so a class-level `@Public()` cannot silently open a handler
+ * that asked for a role (issue #86).
  */
 export const Public = (): CustomDecorator<string> => SetMetadata(IS_PUBLIC_KEY, true);

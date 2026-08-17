@@ -94,7 +94,11 @@ describe('a route with no authorisation decorator is denied by default (I5)', ()
    * to mean authenticated-only.
    */
   it('answers 200 with a valid token — closed, not broken', async () => {
-    const token = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID }).accessToken;
+    const token = tokens.issue({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      role: 'CUSTOMER',
+    }).accessToken;
     const response = await request(app.getHttpServer())
       .get('/api/v1/undecorated/route')
       .set('Authorization', `Bearer ${token}`)
@@ -130,7 +134,7 @@ describe('bearer access tokens (F8/AC5)', () => {
   });
 
   it('accepts a freshly issued token and identifies the caller', async () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
 
     const response = await request(app.getHttpServer())
       .get(PROTECTED)
@@ -207,7 +211,7 @@ describe('bearer access tokens (F8/AC5)', () => {
         NODE_ENV: 'test',
         JWT_ACCESS_SECRET: 'a-completely-different-signing-key!!!!',
       }),
-    ).issue({ userId: USER_ID, sessionId: SESSION_ID });
+    ).issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
 
     await request(app.getHttpServer())
       .get(PROTECTED)
@@ -229,7 +233,7 @@ describe('bearer access tokens (F8/AC5)', () => {
   function issuedAtOffset(offsetSeconds: number): string {
     jest.useFakeTimers({ now: new Date(Date.now() + offsetSeconds * 1000) });
     try {
-      return tokens.issue({ userId: USER_ID, sessionId: SESSION_ID }).accessToken;
+      return tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' }).accessToken;
     } finally {
       jest.useRealTimers();
     }

@@ -30,7 +30,7 @@ describe('AccessTokenService.issue', () => {
   const tokens = serviceWith(SECRET);
 
   it('issues a token carrying the user and the session that minted it (AC1)', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
 
     expect(issued.tokenType).toBe('Bearer');
     expect(issued.expiresIn).toBe(ACCESS_TOKEN_TTL_SECONDS);
@@ -50,7 +50,7 @@ describe('AccessTokenService.issue', () => {
    * so a change to the constant fails here rather than propagating silently.
    */
   it('expires exactly 15 minutes after issue (AC5)', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
     const claims = accessTokenClaimsSchema.parse(jwt.decode(issued.accessToken));
 
     expect(claims.exp - claims.iat).toBe(900);
@@ -58,7 +58,7 @@ describe('AccessTokenService.issue', () => {
   });
 
   it('signs with HS256 and never with `none`', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
     const header = JSON.parse(
       Buffer.from(issued.accessToken.split('.')[0] ?? '', 'base64url').toString('utf8'),
     ) as { alg: string };
@@ -67,12 +67,17 @@ describe('AccessTokenService.issue', () => {
   });
 
   it('carries no password material and no refresh token', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
     const payload = jwt.decode(issued.accessToken) as Record<string, unknown>;
 
     // A JWT payload is base64, not encryption — everything in it is public to whoever
-    // holds the token. Only ids and timestamps belong there.
-    expect(Object.keys(payload).sort()).toEqual(['aud', 'exp', 'iat', 'iss', 'sid', 'sub']);
+    // holds the token. Only ids, timestamps and the role belong there.
+    //
+    // `role` joined the set in F10. It is not sensitive — a caller already knows what
+    // it may do by trying — but it is pinned here for the same reason as the rest: this
+    // assertion is what stops an email address or a name being added to the token by
+    // someone reaching for a convenient place to put it.
+    expect(Object.keys(payload).sort()).toEqual(['aud', 'exp', 'iat', 'iss', 'role', 'sid', 'sub']);
   });
 });
 
@@ -80,7 +85,7 @@ describe('AccessTokenService.verify', () => {
   const tokens = serviceWith(SECRET);
 
   it('accepts a token it issued and returns the parsed claims', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
     const claims = tokens.verify(issued.accessToken);
 
     expect(claims.sub).toBe(USER_ID);
@@ -105,14 +110,14 @@ describe('AccessTokenService.verify', () => {
     });
 
     it('still accepts the token one second before it expires', () => {
-      const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+      const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
 
       jest.advanceTimersByTime((ACCESS_TOKEN_TTL_SECONDS - 1) * 1000);
       expect(tokens.verify(issued.accessToken).sub).toBe(USER_ID);
     });
 
     it('rejects it with a 401 domain error once fifteen minutes have passed', () => {
-      const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+      const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
 
       jest.advanceTimersByTime((ACCESS_TOKEN_TTL_SECONDS + 1) * 1000);
 
@@ -137,7 +142,11 @@ describe('AccessTokenService.verify', () => {
   });
 
   it('rejects a token signed with a different key', () => {
-    const forged = serviceWith(OTHER_SECRET).issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const forged = serviceWith(OTHER_SECRET).issue({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      role: 'CUSTOMER',
+    });
     expect(failureOf(() => tokens.verify(forged.accessToken))).toBeInstanceOf(UnauthenticatedError);
   });
 
@@ -156,7 +165,7 @@ describe('AccessTokenService.verify', () => {
    * resolver would change which default applies.
    */
   it('rejects an unsigned token that claims alg=none', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
     const payloadSegment = issued.accessToken.split('.')[1] ?? '';
     const noneHeader = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString(
       'base64url',
@@ -193,7 +202,7 @@ describe('AccessTokenService.verify', () => {
   });
 
   it('rejects a token whose payload was edited to impersonate someone else', () => {
-    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID });
+    const issued = tokens.issue({ userId: USER_ID, sessionId: SESSION_ID, role: 'CUSTOMER' });
     const [header, payload, signature] = issued.accessToken.split('.');
     const tampered = JSON.parse(Buffer.from(payload ?? '', 'base64url').toString('utf8')) as Record<
       string,

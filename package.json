@@ -21,8 +21,8 @@
     "check:env": "node scripts/check-env-example.mjs",
     "check:infra": "node scripts/check-infra-config.mjs",
     "check:ports": "node scripts/check-ports.mjs",
-    "check:parser": "node scripts/lib/compose.spec.mjs",
-    "check:repo": "pnpm run check:parser && pnpm run check:workspace && pnpm run check:env && pnpm run check:infra && pnpm run check:ci",
+    "check:parser": "node scripts/lib/compose.spec.mjs && node scripts/lib/prisma-enums.spec.mjs",
+    "check:repo": "pnpm run check:parser && pnpm run check:workspace && pnpm run check:env && pnpm run check:infra && pnpm run check:ci && pnpm run check:enums",
     "verify": "pnpm run check:repo && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
     "infra:up": "pnpm run check:ports && docker compose -f infra/docker-compose.yml up -d --wait",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
@@ -30,7 +30,9 @@
     "db:migrate": "pnpm --filter @repo/api run db:migrate",
     "db:seed": "pnpm --filter @repo/api run db:seed",
     "db:reset": "pnpm --filter @repo/api run db:reset",
-    "check:ci": "node scripts/check-ci-workflow.mjs"
+    "check:ci": "node scripts/check-ci-workflow.mjs",
+    "gen:enums": "node scripts/generate-enums.mjs",
+    "check:enums": "node scripts/check-enums-generated.mjs"
   },
   "devDependencies": {
     "@repo/config": "workspace:*",
