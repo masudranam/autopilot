@@ -23,11 +23,28 @@
  */
 export function parseEnums(schemaText) {
   const enums = [];
-  const blockPattern = /(^|\n)\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([^}]*)\}/g;
+  // The closing brace is anchored to the start of a line, and the body is matched
+  // lazily across newlines — NOT `[^}]*`, which stops at the first `}` ANYWHERE.
+  //
+  // That earlier form truncated the block at a brace inside a comment, so a doc comment
+  // like `/// see the {finance} runbook` silently dropped every value below it. No throw
+  // fired, because the truncated body still parsed cleanly — the same self-consistent
+  // drift as the value-level-attribute bug, reached through a different door.
+  //
+  // This is the matcher `apps/api/src/db/schema-invariants.spec.ts:167` already used and
+  // which is immune to it; the generator should have borrowed it from the start.
+  // Leading whitespace is tolerated on BOTH anchors. Anchoring to a bare `^\}` traded
+  // the comment-brace bug for a narrower one: an enum that is the final block in the
+  // file with an indented closing brace matched nothing and was dropped whole, silently
+  // — `gen:enums` reported one fewer enum and `check:enums` exited 0. Found by the review
+  // of PR #91, which is the third pass over this expression; each earlier version fixed
+  // a silent drop by introducing a smaller one, so the lesson is to be permissive about
+  // layout and strict about content, which is what the per-line parsing below does.
+  const blockPattern = /^[ \t]*enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)^[ \t]*\}/gm;
 
   for (const match of schemaText.matchAll(blockPattern)) {
-    const name = match[2];
-    const body = match[3] ?? '';
+    const name = match[1];
+    const body = match[2] ?? '';
 
     const lines = body
       .split('\n')
