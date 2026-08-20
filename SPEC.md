@@ -12,7 +12,7 @@ A modern ecommerce platform — storefront, admin, API — built as a monorepo. 
 produced by Claude Code through an automated loop: GitHub issue → branch → implement → verify → pull
 request → subagent review → auto-merge on green.
 
-The workflow is as much the deliverable as the product. See `.claude/rules/00-workflow.md`.
+The workflow is as much the deliverable as the product. See CLAUDE.md §Workflow.
 
 ---
 
@@ -398,8 +398,8 @@ wiring — is production code; only the route is synthetic.
   authenticated default to specific roles rather than establishing it.
 - AC4 Prisma enums are generated into `@repo/contracts` (`pnpm gen:enums`) and `check:repo` fails on
   drift. _Added in F10: putting a role on the wire needs `Role` in the contracts package, and
-  rules/20-contracts.md §3 forbids hand-writing a union that mirrors a database enum — so the
-  generator that rule assumes had to exist before AC1 could be built correctly._
+  CLAUDE.md §Contracts forbids hand-writing a union that mirrors a database enum — so the generator
+  that rule assumes had to exist before AC1 could be built correctly._
 
 **F11 · Email verification & password reset** — _deps: F7, F39_
 

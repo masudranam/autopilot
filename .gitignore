@@ -41,5 +41,11 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/settings.recommended.json
 
-# Claude harness runtime state — verdicts are per-checkout, not shared history
+# Claude harness runtime state — verdicts are per-checkout, not shared history.
+# ONLY the state directory: `.claude/` as a whole would untrack the rules, agents,
+# hooks, skills and settings, which are checked-in shared configuration. Git keeps
+# already-tracked files tracked, so the wider pattern did not delete anything — it
+# silently stopped new harness files being added, and broke `git add` partway through
+# a commit, which is how the rules consolidation ended up half-staged.
 .claude/state/
+.agents

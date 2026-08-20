@@ -1,5 +1,5 @@
 /**
- * Integration tests for the seed — real database, no mocks (rules/30-prisma.md).
+ * Integration tests for the seed — real database, no mocks (CLAUDE.md § Prisma & data).
  *
  * Covers F3/AC3 (idempotency, I8) and F3/AC4 (browsable catalogue). The test script
  * runs `prisma migrate deploy && prisma db seed` first, so the database is migrated

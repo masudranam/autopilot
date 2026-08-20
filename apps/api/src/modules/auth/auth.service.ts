@@ -164,7 +164,7 @@ export class AuthService {
    * with the same 401 as a valid-looking but unknown one, because "your cookie is the
    * wrong shape" is information about the token format, not about this caller.
    *
-   * There is deliberately no grace window on reuse. rules/60-security.md states the
+   * There is deliberately no grace window on reuse. CLAUDE.md § Security states the
    * rule plainly — presenting an already-rotated token is evidence of theft, not a
    * retry — and a grace window is exactly the seam an attacker races into: it turns
    * "one of you is an impostor" into "both of you get a token". The cost is real and

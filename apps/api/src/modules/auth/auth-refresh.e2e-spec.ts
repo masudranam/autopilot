@@ -340,7 +340,7 @@ describe('POST /auth/refresh', () => {
   });
 
   /**
-   * The race, over HTTP (AC2/AC3, rules/50-testing.md §4).
+   * The race, over HTTP (AC2/AC3, CLAUDE.md § Testing).
    *
    * Promise.all, not a loop: a sequential version passes even when rotation is a
    * read-then-write, because nothing overlaps.

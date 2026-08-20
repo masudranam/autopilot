@@ -12,7 +12,7 @@ The order matters. Doing it out of order produces drift that the next migration 
 
 ## 1 · Edit the schema
 
-`apps/api/prisma/schema.prisma`. Follow [.claude/rules/30-prisma.md](../../rules/30-prisma.md):
+`apps/api/prisma/schema.prisma`. Follow [CLAUDE.md §Prisma & data](../../../CLAUDE.md):
 
 - `id String @id @default(uuid(7))`
 - `createdAt` / `updatedAt` on every model

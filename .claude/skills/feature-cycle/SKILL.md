@@ -47,11 +47,11 @@ Always branch from fresh `main`. Committing on `main` is blocked by a hook.
 Write it directly — there are no implementation subagents. Handing the work to one costs a full
 context hand-off and a re-read of the same rules, for a feature you are already holding in mind.
 
-Contracts and migrations come before implementation. See `.claude/rules/20-contracts.md`.
+Contracts and migrations come before implementation. See the Contracts section of CLAUDE.md.
 
 Write the tests as you go, one per acceptance criterion, each one able to fail if the behaviour
-regresses. `.claude/rules/50-testing.md` lists what is required and — just as important — what is
-not. Do not add coverage beyond it out of habit.
+regresses. CLAUDE.md §Testing lists what is required and — just as important — what is not. Do not
+add coverage beyond it out of habit.
 
 ## 5 · Push and let CI verify
 

@@ -4,7 +4,7 @@ import { ProblemType, type FieldError } from '@repo/contracts';
  * Base class for every error a domain service is allowed to throw.
  *
  * Services describe WHAT went wrong; the global filter decides how it appears on the
- * wire (I3, rules/10-backend.md). Nothing outside `common/filters` constructs an HTTP
+ * wire (I3, CLAUDE.md § Backend). Nothing outside `common/filters` constructs an HTTP
  * response shape — that is what keeps one filter in charge of the wire format.
  */
 export abstract class DomainError extends Error {

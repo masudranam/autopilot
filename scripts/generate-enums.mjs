@@ -6,7 +6,7 @@
  *
  * Run it after changing an enum in the schema. `pnpm check:repo` fails if the committed
  * file and the schema disagree, so forgetting is a red check rather than a runtime
- * surprise (rules/20-contracts.md §3).
+ * surprise (CLAUDE.md §Contracts).
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
