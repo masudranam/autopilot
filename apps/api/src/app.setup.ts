@@ -65,7 +65,7 @@ export function configureApp(app: INestApplication, env: Env): void {
   // routes exist: it is a machine-readable index of every path, parameter and payload
   // shape, handed to anonymous callers, and `/api/docs-json` feeds straight into a
   // scanner. The decision is NOT taken here — `env.docsEnabled` is derived in the
-  // validated config service (rules/10-backend.md: process.env is read in one place) —
+  // validated config service (CLAUDE.md § Backend: process.env is read in one place) —
   // and it fails closed, so an unconfigured deploy serves nothing.
   //
   // Gated by not calling `setup()` at all rather than by a guard in front of it: an

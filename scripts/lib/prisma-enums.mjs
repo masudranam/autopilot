@@ -1,7 +1,7 @@
 /**
  * Reads the enums out of `schema.prisma` and renders them as TypeScript.
  *
- * Why generate rather than hand-write (rules/20-contracts.md §3): a union of string
+ * Why generate rather than hand-write (CLAUDE.md §Contracts): a union of string
  * literals mirroring a database enum is a second declaration of the same fact, and the
  * two drift silently — a value added to the schema is a migration plus a runtime that
  * happily returns something the contract says is impossible. Generating means the drift

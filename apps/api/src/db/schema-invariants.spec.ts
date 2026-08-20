@@ -107,7 +107,7 @@ describe('money is integer minor units (AC5, invariant I1)', () => {
   });
 });
 
-describe('relational hygiene (rules/30-prisma.md)', () => {
+describe('relational hygiene (CLAUDE.md § Prisma & data)', () => {
   it('every relation declares an explicit onDelete', () => {
     const code = schema.replace(/\/\/[^\n]*/g, '');
     for (const match of code.matchAll(/@relation\([^)]*fields:[^)]*\)/g)) {
@@ -123,7 +123,7 @@ describe('relational hygiene (rules/30-prisma.md)', () => {
   });
 });
 
-describe('database naming is snake_case (rules/30-prisma.md)', () => {
+describe('database naming is snake_case (CLAUDE.md § Prisma & data)', () => {
   const models = modelBlocks();
   const enumNames = [...schema.matchAll(/^enum\s+(\w+)\s+\{/gm)].map((m) => m[1]!);
   const scalarTypes = new Set([

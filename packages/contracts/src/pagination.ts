@@ -53,7 +53,7 @@ export type CursorQuery = z.infer<typeof cursorQuerySchema>;
  * need page numbers.
  *
  * It exists here so E8's admin tables reuse one shape rather than each inventing its
- * own — the drift that .claude/rules/20-contracts.md rule 5 forbids. Storefront list
+ * own — the drift that CLAUDE.md § Contracts rule 5 forbids. Storefront list
  * endpoints must still use the cursor envelope above.
  */
 export const offsetPageInfoSchema = z.object({
