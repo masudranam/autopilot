@@ -5,7 +5,7 @@ import { z } from 'zod';
  *
  * A missing or malformed variable fails fast with a message naming it, instead of
  * surfacing at 3am as a connection error on the first request that needed it.
- * process.env is read HERE and nowhere else (rules/10-backend.md).
+ * process.env is read HERE and nowhere else (CLAUDE.md § Backend).
  *
  * Defaults exist so a fresh clone runs against the compose stack with zero setup —
  * but ONLY outside production. In production every connection-bearing variable must

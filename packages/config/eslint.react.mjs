@@ -8,7 +8,7 @@ import globals from 'globals';
  * Flat config for the Next.js apps (storefront, admin).
  *
  * Accessibility rules are errors, not warnings: WCAG AA is an acceptance criterion
- * on every user-facing feature (see .claude/rules/40-frontend.md), so a11y regressions
+ * on every user-facing feature (see CLAUDE.md § Frontend), so a11y regressions
  * have to fail the gate rather than accumulate as warnings nobody reads.
  */
 export default [

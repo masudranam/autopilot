@@ -3,7 +3,7 @@ import { createPrismaClient, type PrismaClient } from '../../db/client';
 
 /**
  * The one PrismaClient for the application. Modules inject this service; nothing
- * else constructs a client (rules/10-backend.md — repositories only).
+ * else constructs a client (CLAUDE.md § Backend — repositories only).
  */
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {

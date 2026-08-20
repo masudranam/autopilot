@@ -3,7 +3,7 @@ import type { RoleName } from '@repo/contracts';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 
 /**
- * The only place the auth module touches Prisma (rules/10-backend.md).
+ * The only place the auth module touches Prisma (CLAUDE.md § Backend).
  *
  * These interfaces are row projections, not wire shapes — the API response shape is
  * `RegisteredUser` in `@repo/contracts` and the service maps to it (I2).

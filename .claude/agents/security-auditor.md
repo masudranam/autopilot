@@ -16,7 +16,7 @@ You do not fix anything. You find, verify, and report.
 ## Scope
 
 Read the diff (`gh pr diff <n>`) and the surrounding code the diff touches. Read
-[.claude/rules/60-security.md](../rules/60-security.md) and SPEC.md §2 first.
+[CLAUDE.md § Security](CLAUDE.md § Security) and SPEC.md §2 first.
 
 ## What to hunt
 

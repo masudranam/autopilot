@@ -87,7 +87,7 @@ export type RegisterRequest = z.infer<typeof registerRequestSchema>;
  *
  * `role` is absent deliberately. Registration always produces a CUSTOMER, and the
  * only correct way to put a role on the wire is the enum generated from
- * `schema.prisma` (rules/20-contracts.md §3). That generator arrived with F10
+ * `schema.prisma` (CLAUDE.md § Contracts). That generator arrived with F10
  * (`pnpm gen:enums`), so `roleSchema` above is derived from it — but registration
  * always produces a CUSTOMER, and a role on this response would invite a client to
  * treat it as settable.
@@ -182,7 +182,7 @@ export const ACCESS_TOKEN_ISSUER = 'agentic-shop';
 export const ACCESS_TOKEN_AUDIENCE = 'agentic-shop-api';
 
 /**
- * The caller's role, straight from the Prisma enum (rules/20-contracts.md §3).
+ * The caller's role, straight from the Prisma enum (CLAUDE.md § Contracts).
  *
  * `z.enum(ROLE_VALUES)` rather than `z.enum(['CUSTOMER', ...])`: the values come from
  * the generated module, so adding a role to `schema.prisma` and forgetting to update
@@ -260,7 +260,7 @@ export type SessionSummary = z.infer<typeof sessionSummarySchema>;
  * A bare array rather than the paginated envelope from `pagination.ts`: sessions are
  * bounded by how many devices one person signs in from, the set is already filtered to
  * active rows, and a cursor over a handful of rows is machinery with nothing to do.
- * `paginatedSchema` stays the rule for open-ended collections (rules/20-contracts.md §5).
+ * `paginatedSchema` stays the rule for open-ended collections (CLAUDE.md § Contracts).
  */
 export const sessionListSchema = z.array(sessionSummarySchema);
 

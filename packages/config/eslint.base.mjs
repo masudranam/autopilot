@@ -81,7 +81,7 @@ export default tseslint.config(
         {
           name: 'parseFloat',
           message:
-            'Money is stored as integer minor units — see .claude/rules/10-backend.md. Use parseInt or a Money helper, never parseFloat on a monetary value.',
+            'Money is stored as integer minor units — see CLAUDE.md § Backend. Use parseInt or a Money helper, never parseFloat on a monetary value.',
         },
       ],
       'no-restricted-properties': [

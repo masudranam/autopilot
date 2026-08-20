@@ -7,9 +7,9 @@
 F7 stores customer passwords. The choice that has to be made explicit is not "hash them" but which
 function, which parameters, and which binding — all three fail quietly if they are wrong.
 
-**Function.** SPEC.md F7/AC1 and `.claude/rules/60-security.md` both name Argon2id specifically, and
-the "id" matters. Argon2**d** accesses memory in a password-dependent order, which resists GPU
-cracking well but leaks through cache side channels on shared hardware. Argon2**i** is the reverse:
+**Function.** SPEC.md F7/AC1 and `CLAUDE.md § Security` both name Argon2id specifically, and the
+"id" matters. Argon2**d** accesses memory in a password-dependent order, which resists GPU cracking
+well but leaks through cache side channels on shared hardware. Argon2**i** is the reverse:
 side-channel resistant, weaker against time–memory tradeoffs. Argon2**id** runs the first half-pass
 as Argon2i and the rest as Argon2d, and is the variant RFC 9106 and OWASP recommend for password
 storage. Nothing in the encoded output makes the difference obvious to a reader, so a wrong constant

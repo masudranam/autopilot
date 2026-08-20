@@ -2,7 +2,7 @@
 /**
  * Fails if `enums.generated.ts` and `schema.prisma` disagree.
  *
- * This is what makes rules/20-contracts.md §3 a rule rather than a suggestion. Without
+ * This is what makes CLAUDE.md § Contracts a rule rather than a suggestion. Without
  * it, adding a value to a Prisma enum and forgetting to regenerate leaves the contract
  * asserting a value is impossible while the database returns it — and every consumer
  * that narrowed on the union is wrong in a way TypeScript cannot see.
@@ -47,7 +47,7 @@ if (actual !== expected) {
       `    committed: ${JSON.stringify(actualLines[at] ?? '<end of file>')}\n` +
       `    expected:  ${JSON.stringify(expectedLines[at] ?? '<end of file>')}\n\n` +
       'Run `pnpm gen:enums` and commit the result. Do not edit the generated file by hand —\n' +
-      'the schema is the single source of truth for what an enum contains (rules/20-contracts.md §3).',
+      'the schema is the single source of truth for what an enum contains (CLAUDE.md § Contracts).',
   );
   process.exit(1);
 }

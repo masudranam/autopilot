@@ -420,7 +420,7 @@ describe('F9 · sessions', () => {
 });
 
 /**
- * The statement count for the list endpoint (rules/50-testing.md §3).
+ * The statement count for the list endpoint (CLAUDE.md § Testing).
  *
  * `GET /auth/sessions` is the project's first list endpoint, so this is the N+1 guard.
  * One SELECT, whatever the number of sessions — a per-row lookup added later to

@@ -6,7 +6,7 @@
  */
 // Generated from schema.prisma by `pnpm gen:enums`; `pnpm check:repo` fails on drift.
 // Exported first so a hand-written union mirroring a database enum has no excuse to
-// exist (rules/20-contracts.md §3).
+// exist (CLAUDE.md § Contracts).
 export * from './enums.generated';
 export * from './auth';
 export * from './money';
