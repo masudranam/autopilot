@@ -9,6 +9,7 @@
 // exist (rules/20-contracts.md §3).
 export * from './enums.generated';
 export * from './auth';
+export * from './account';
 export * from './money';
 export * from './pagination';
 export * from './problem-details';

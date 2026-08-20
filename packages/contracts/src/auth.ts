@@ -56,11 +56,33 @@ export const passwordSchema = z
   .min(PASSWORD_MIN_LENGTH, `Must be at least ${PASSWORD_MIN_LENGTH} characters`)
   .max(PASSWORD_MAX_LENGTH, `Must be at most ${PASSWORD_MAX_LENGTH} characters`);
 
+/**
+ * Rejects C0/C1 control characters, including U+0000.
+ *
+ * A NUL byte passes every length and format check and then dies in Postgres —
+ * `22021 invalid byte sequence for encoding "UTF8": 0x00` — as an unhandled 500. Found
+ * by the security review of PR #95 on both an address field and `firstName`, so it was
+ * reachable through F7's registration as well as F12's profile. The failure is an
+ * attacker-triggerable 500 and an error-level log line rather than an exposure (the
+ * production body stays generic and the transaction rolls back), but unvalidated input
+ * reaching the driver is the thing the edge is supposed to stop (I2).
+ *
+ * Newlines and tabs are refused too: a person's name and a street line are single-line
+ * values, and a multi-line one is either a paste accident or an injection attempt on
+ * whatever renders it later.
+ */
+export const noControlCharacters = (value: string): boolean =>
+  // eslint-disable-next-line no-control-regex
+  !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+
+export const CONTROL_CHARACTER_MESSAGE = 'Must not contain control characters';
+
 export const personNameSchema = z
   .string()
   .trim()
   .min(1, 'Must not be empty')
-  .max(NAME_MAX_LENGTH, `Must be at most ${NAME_MAX_LENGTH} characters`);
+  .max(NAME_MAX_LENGTH, `Must be at most ${NAME_MAX_LENGTH} characters`)
+  .refine(noControlCharacters, { message: CONTROL_CHARACTER_MESSAGE });
 
 /**
  * `strictObject`, not `object`: an unknown key is rejected rather than stripped.

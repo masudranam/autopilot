@@ -73,7 +73,7 @@ export default tseslint.config(
       'prefer-const': 'error',
       'no-var': 'error',
 
-      // ---- Project-specific invariants (see .claude/rules/) ----
+      // ---- Project-specific invariants (see CLAUDE.md) ----
       // Money is integer minor units, never a float. `parseFloat` on a price and
       // `toFixed` for money formatting are the two ways that rule gets broken.
       'no-restricted-globals': [
@@ -81,7 +81,7 @@ export default tseslint.config(
         {
           name: 'parseFloat',
           message:
-            'Money is stored as integer minor units — see .claude/rules/10-backend.md. Use parseInt or a Money helper, never parseFloat on a monetary value.',
+            'Money is stored as integer minor units — see CLAUDE.md §Backend. Use parseInt or a Money helper, never parseFloat on a monetary value.',
         },
       ],
       'no-restricted-properties': [

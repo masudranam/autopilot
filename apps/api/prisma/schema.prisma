@@ -204,6 +204,11 @@ model Address {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([userId])
+  // F12/AC2 also puts a PARTIAL unique index on (user_id, kind) WHERE is_default, so a
+  // user can hold at most one default per kind. Prisma cannot express a WHERE clause on
+  // an index, so it lives in 20260819140000_address_one_default_per_kind as raw SQL —
+  // and `prisma migrate diff` cannot see it either, so nothing reports its absence as
+  // drift. The parallel test in the address suite is what actually protects it.
   @@map("addresses")
 }
 
