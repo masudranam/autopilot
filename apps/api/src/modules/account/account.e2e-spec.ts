@@ -14,6 +14,7 @@ import request from 'supertest';
 import {
   addressListSchema,
   addressSchema,
+  MAX_ADDRESSES_PER_ACCOUNT,
   problemDetailsSchema,
   ProblemType,
   profileSchema,
@@ -322,6 +323,66 @@ describe('F12 · profile and addresses', () => {
     expect(defaults).toBe(1);
   });
 
+  /**
+   * A NUL byte used to reach Postgres and surface as an unhandled 500 (security review
+   * of PR #95): `22021 invalid byte sequence for encoding "UTF8"`. The edge is where
+   * that has to stop (I2), so every text field refuses control characters.
+   */
+  it('rejects a control character in an address field rather than 500ing (AC2)', async () => {
+    const nul = String.fromCharCode(0);
+    for (const field of ['fullName', 'line1', 'city', 'postalCode']) {
+      const response = await request(app.getHttpServer())
+        .post(ADDRESSES)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send(addressBody({ [field]: `bad${nul}value` }));
+      expect(response.status).toBe(422);
+    }
+  });
+
+  it('rejects a control character in a profile name rather than 500ing (AC1)', async () => {
+    const nul = String.fromCharCode(0);
+    await request(app.getHttpServer())
+      .patch(ME)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ firstName: `Ev${nul}e` })
+      .expect(422);
+    // A newline is refused too: a name is a single-line value.
+    await request(app.getHttpServer())
+      .patch(ME)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ firstName: `Ada${String.fromCharCode(10)}Lovelace` })
+      .expect(422);
+  });
+
+  it('caps how many addresses one account may hold (AC2)', async () => {
+    const owner = await prisma.user.findUniqueOrThrow({ where: { email: OWNER } });
+    // Seeded directly to the cap — going through the endpoint 50 times would test the
+    // endpoint's speed rather than the cap.
+    await prisma.address.createMany({
+      data: Array.from({ length: MAX_ADDRESSES_PER_ACCOUNT }, (_, index) => ({
+        userId: owner.id,
+        kind: 'SHIPPING' as const,
+        isDefault: false,
+        fullName: 'Ada',
+        line1: `${index} Road`,
+        city: 'London',
+        postalCode: 'X',
+        country: 'GB',
+      })),
+    });
+
+    const response = await request(app.getHttpServer())
+      .post(ADDRESSES)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send(addressBody({ city: 'One too many' }))
+      .expect(409);
+
+    expect(problemDetailsSchema.parse(response.body).type).toBe(ProblemType.CONFLICT);
+    expect(await prisma.address.count({ where: { userId: owner.id } })).toBe(
+      MAX_ADDRESSES_PER_ACCOUNT,
+    );
+  });
+
   it('rejects a malformed country code (AC2)', async () => {
     await request(app.getHttpServer())
       .post(ADDRESSES)
@@ -438,6 +499,10 @@ describe('F12 · profile and addresses', () => {
       .get(`${ADDRESSES}/00000000-0000-7000-8000-000000000000`)
       .expect(401);
     await request(app.getHttpServer())
+      .patch(`${ADDRESSES}/00000000-0000-7000-8000-000000000000`)
+      .send({ city: 'X' })
+      .expect(401);
+    await request(app.getHttpServer())
       .delete(`${ADDRESSES}/00000000-0000-7000-8000-000000000000`)
       .expect(401);
   });
@@ -509,5 +574,123 @@ describe('listing addresses issues exactly one statement', () => {
 
     expect(addressListSchema.parse(response.body)).toHaveLength(3);
     expect(operations).toEqual(['Address.findMany']);
+  });
+});
+
+/**
+ * THE CONSTRAINT ITSELF, ASSERTED DIRECTLY (F12/AC2).
+ *
+ * The race test below the CRUD suite exercises the service path, and the review of
+ * PR #95 measured what it is worth as a guard on the mechanism: with
+ * `addresses_one_default_per_kind` dropped, the full suite still went green in 5 of 16
+ * runs — a ~31% miss rate — and a predicate weakened to SHIPPING only passed 18/18,
+ * because that test never fires a BILLING create.
+ *
+ * A race is the wrong instrument for proving a constraint exists. These two tests are
+ * deterministic:
+ *
+ *   1. the constraint REJECTS a second default, for each kind, via direct inserts that
+ *      bypass the service entirely — so no application logic can mask its absence;
+ *   2. the index definition is what it is supposed to be, so a narrowed predicate fails
+ *      by name rather than by luck.
+ *
+ * The PR body originally reported the drop-index mutation as a clean single-shot result.
+ * It was one run.
+ */
+describe('the one-default-per-kind constraint is enforced by the database', () => {
+  let prisma: PrismaClient;
+  let userId = '';
+
+  beforeAll(() => {
+    prisma = createPrismaClient();
+  });
+
+  beforeEach(async () => {
+    await removeTestUsers(prisma);
+    const user = await prisma.user.create({
+      data: {
+        email: `constraint${TEST_DOMAIN}`,
+        passwordHash: 'not-used-by-this-suite',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+      },
+      select: { id: true },
+    });
+    userId = user.id;
+  });
+
+  afterAll(async () => {
+    await removeTestUsers(prisma);
+    await prisma.$disconnect();
+  });
+
+  /** A row straight into the table — no service, no transaction, no pre-clear. */
+  function insertDefault(kind: 'SHIPPING' | 'BILLING', city: string) {
+    return prisma.address.create({
+      data: {
+        userId,
+        kind,
+        isDefault: true,
+        fullName: 'Ada Lovelace',
+        line1: '12 Analytical Way',
+        city,
+        postalCode: 'EC1A 1BB',
+        country: 'GB',
+      },
+      select: { id: true },
+    });
+  }
+
+  it.each(['SHIPPING', 'BILLING'] as const)(
+    'refuses a second default %s address at the database level',
+    async (kind) => {
+      await insertDefault(kind, 'First');
+      // Not "the service prevents this" — the database does, with the service removed
+      // from the picture. Dropping or narrowing the index fails this deterministically.
+      await expect(insertDefault(kind, 'Second')).rejects.toMatchObject({ code: 'P2002' });
+    },
+  );
+
+  it('still allows one default of each kind at the same time', async () => {
+    await insertDefault('SHIPPING', 'Ship here');
+    await insertDefault('BILLING', 'Bill here');
+    expect(await prisma.address.count({ where: { userId, isDefault: true } })).toBe(2);
+  });
+
+  it('still allows any number of NON-default addresses', async () => {
+    // The predicate half of the index. A constraint on (user_id, kind) without the
+    // WHERE would reject these, and the seed would fail to build the index at all.
+    for (const city of ['A', 'B', 'C']) {
+      await prisma.address.create({
+        data: {
+          userId,
+          kind: 'SHIPPING',
+          isDefault: false,
+          fullName: 'Ada',
+          line1: '1 Road',
+          city,
+          postalCode: 'X',
+          country: 'GB',
+        },
+      });
+    }
+    expect(await prisma.address.count({ where: { userId, isDefault: false } })).toBe(3);
+  });
+
+  it('the index exists with the predicate the migration declares', async () => {
+    const rows = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'addresses'
+        AND indexname = 'addresses_one_default_per_kind'
+    `;
+
+    expect(rows).toHaveLength(1);
+    const definition = rows[0]?.indexdef ?? '';
+    // Named parts rather than a byte-for-byte match: Postgres normalises whitespace and
+    // quoting, but a narrowed predicate or a dropped column changes these.
+    expect(definition).toContain('UNIQUE INDEX');
+    expect(definition).toMatch(/\(user_id, kind\)/);
+    expect(definition).toMatch(/WHERE is_default$/);
   });
 });

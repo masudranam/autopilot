@@ -131,6 +131,11 @@ export class AccountRepository {
     });
   }
 
+  /** How many addresses the caller holds — for the per-account cap. */
+  countAddresses(userId: string): Promise<number> {
+    return this.prisma.client.address.count({ where: { userId } });
+  }
+
   /** Scoped by owner, so another account's id is indistinguishable from a missing one. */
   findAddressForUser(addressId: string, userId: string): Promise<AddressRow | null> {
     return this.prisma.client.address.findFirst({

@@ -6,6 +6,7 @@ import type {
   UpdateAddressRequest,
   UpdateProfileRequest,
 } from '@repo/contracts';
+import { MAX_ADDRESSES_PER_ACCOUNT } from '@repo/contracts';
 import { ConflictError, NotFoundError } from '../../common/errors/domain-error';
 import { AccountRepository, type AddressRow, type ProfileRow } from './account.repository';
 
@@ -60,6 +61,17 @@ export class AccountService {
    * a 500 is the difference between "try again" and "the server is broken".
    */
   async createAddress(userId: string, input: CreateAddressRequest): Promise<Address> {
+    // A resource cap, not rate limiting. The security review of PR #95 stored 120
+    // addresses in parallel on one account and read all of them back in a single 35 KB
+    // response; F51's throttling would slow that down without ever bounding it. The
+    // count is a cheap indexed query on a column the list endpoint already filters by.
+    const held = await this.accounts.countAddresses(userId);
+    if (held >= MAX_ADDRESSES_PER_ACCOUNT) {
+      throw new ConflictError(
+        `An account may hold at most ${MAX_ADDRESSES_PER_ACCOUNT} addresses. Remove one first.`,
+      );
+    }
+
     try {
       return toAddress(await this.accounts.createAddress(userId, input));
     } catch (error) {

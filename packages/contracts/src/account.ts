@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { AddressKind, ADDRESS_KIND_VALUES } from './enums.generated';
-import { emailSchema, personNameSchema, roleSchema } from './auth';
+import {
+  CONTROL_CHARACTER_MESSAGE,
+  emailSchema,
+  noControlCharacters,
+  personNameSchema,
+  roleSchema,
+} from './auth';
 
 /**
  * Profile and address-book contracts (SPEC.md F12).
@@ -70,8 +76,28 @@ export const countrySchema = z
     message: 'Must be a two-letter ISO 3166-1 alpha-2 country code',
   });
 
-const addressLineSchema = z.string().trim().min(1, 'Must not be empty').max(200);
-const optionalAddressLineSchema = z.string().trim().max(200).nullable().optional();
+const addressLineSchema = z
+  .string()
+  .trim()
+  .min(1, 'Must not be empty')
+  .max(200)
+  .refine(noControlCharacters, { message: CONTROL_CHARACTER_MESSAGE });
+
+const optionalAddressLineSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .refine(noControlCharacters, { message: CONTROL_CHARACTER_MESSAGE })
+  .nullable()
+  .optional();
+
+/** Same guard as the lines above; a postal code is not a place for a newline either. */
+const postalCodeSchema = z
+  .string()
+  .trim()
+  .min(1, 'Must not be empty')
+  .max(32)
+  .refine(noControlCharacters, { message: CONTROL_CHARACTER_MESSAGE });
 
 /**
  * One address in the caller's address book (F12/AC2).
@@ -114,7 +140,7 @@ export const createAddressRequestSchema = z.strictObject({
   line2: optionalAddressLineSchema,
   city: addressLineSchema,
   region: optionalAddressLineSchema,
-  postalCode: z.string().trim().min(1, 'Must not be empty').max(32),
+  postalCode: postalCodeSchema,
   country: countrySchema,
 });
 
@@ -136,7 +162,7 @@ export const updateAddressRequestSchema = z
     line2: optionalAddressLineSchema,
     city: addressLineSchema.optional(),
     region: optionalAddressLineSchema,
-    postalCode: z.string().trim().min(1).max(32).optional(),
+    postalCode: postalCodeSchema.optional(),
     country: countrySchema.optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
@@ -148,10 +174,25 @@ export type UpdateAddressRequest = z.infer<typeof updateAddressRequestSchema>;
 /**
  * The address list.
  *
- * A bare array, not the paginated envelope: an address book is bounded by how many
- * places one person ships to. `paginatedSchema` remains the rule for open-ended
- * collections (§ Contracts).
+ * A bare array, not the paginated envelope.
+ *
+ * The first version of this comment justified that by asserting an address book is
+ * "bounded by how many places one person ships to". That was an assumption, not a
+ * constraint — the security review of PR #95 created 120 addresses in parallel and got
+ * all 132 back in one 35 KB response. `MAX_ADDRESSES_PER_ACCOUNT` is the constraint
+ * that makes the claim true, enforced in the service on create.
+ *
+ * `paginatedSchema` remains the rule for genuinely open-ended collections (§ Contracts).
  */
+/**
+ * How many addresses one account may hold.
+ *
+ * Generous for a person and small enough that the list stays one cheap query and a
+ * small response. It is a resource cap, not rate limiting — F51's throttling would
+ * slow an abuser down without ever bounding what they had already stored.
+ */
+export const MAX_ADDRESSES_PER_ACCOUNT = 50;
+
 export const addressListSchema = z.array(addressSchema);
 
 export type AddressList = z.infer<typeof addressListSchema>;
