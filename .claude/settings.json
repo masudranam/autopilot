@@ -22,7 +22,9 @@
       "Read(./**/*.key)",
       "Read(./**/id_rsa*)",
       "Read(./**/.npmrc)",
-      "Read(./**/secrets/**)"
+      "Read(./**/secrets/**)",
+      "Read(./credentials*)",
+      "Read(./**/credentials*)"
     ]
   },
   "hooks": {
@@ -30,13 +32,21 @@
       {
         "matcher": "Bash|PowerShell",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/guard-git.mjs", "timeout": 15 }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/guard-git.mjs",
+            "timeout": 15
+          }
         ]
       },
       {
         "matcher": "Write|Edit|NotebookEdit",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/guard-write.mjs", "timeout": 15 }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/guard-write.mjs",
+            "timeout": 15
+          }
         ]
       }
     ],
@@ -44,23 +54,40 @@
       {
         "matcher": "Write|Edit",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/post-edit.mjs", "timeout": 45 }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/post-edit.mjs",
+            "timeout": 45
+          }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/stop-verify.mjs", "timeout": 20 }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/stop-verify.mjs",
+            "timeout": 20
+          }
         ]
       }
     ],
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/session-start.mjs", "timeout": 30 }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/session-start.mjs",
+            "timeout": 30
+          }
         ]
       }
     ]
+  },
+  "disableSkillShellExecution": true,
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": false
   }
 }

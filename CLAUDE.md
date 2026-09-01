@@ -155,6 +155,10 @@ and surface its per-field `errors[]`.
   ts-jest uses real tsc. `dev` uses `tsc-watch` for exactly this reason.
 - **`*.spec.ts` globs do not match `*.e2e-spec.ts`.** Update jest `testMatch` and
   `tsconfig.build.json` `exclude` together, or the e2e suite silently never runs.
+- **`sandbox.failIfUnavailable` must stay `false` here.** The sandbox is enabled, but the Windows
+  sandbox is feature-gated off on this machine, so it degrades to a warning and commands run
+  unsandboxed. Setting `failIfUnavailable: true` makes Claude Code _refuse to start_ — measured, not
+  guessed. Flip it once `claude -p` stops printing the "Sandbox disabled" warning.
 
 ## Gate, ports and commands
 
